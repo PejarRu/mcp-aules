@@ -100,13 +100,16 @@ func (a *app) validateAuth(p authPage, responseType string) error {
 func (a *app) authorizeGet(w http.ResponseWriter, r *http.Request) {
 	p := authInput(r)
 	if err := a.validateAuth(p, r.URL.Query().Get("response_type")); err != nil {
+		log.Printf("OAuth authorize request rejected: %v", err)
 		http.Error(w, "invalid authorization request", 400)
 		return
 	}
+	log.Printf("OAuth authorize page opened for client %s", shortID(p.ClientID))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	loginTemplate.Execute(w, p)
 }
 func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
+	started := time.Now()
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if r.ParseForm() != nil {
 		http.Error(w, "invalid request", 400)
@@ -114,12 +117,14 @@ func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
 	}
 	p := authInput(r)
 	if err := a.validateAuth(p, "code"); err != nil {
+		log.Printf("OAuth authorize submission rejected: %v", err)
 		http.Error(w, "invalid authorization request", 400)
 		return
 	}
+	log.Printf("OAuth Aules authentication started for client %s", shortID(p.ClientID))
 	token, err := api.GetTokenFromCredentials(r.Context(), a.cfg.MoodleURL, r.FormValue("username"), r.FormValue("password"))
 	if err != nil {
-		log.Printf("Aules authentication failed: %v", err)
+		log.Printf("OAuth Aules authentication failed for client %s after %s: %v", shortID(p.ClientID), time.Since(started).Round(time.Millisecond), err)
 		p.Error = "No se pudo iniciar sesión. Comprueba el usuario de Aules y la contraseña e inténtalo de nuevo."
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
@@ -128,9 +133,11 @@ func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
 	}
 	code, err := a.store.CreateCode(p.ClientID, p.RedirectURI, p.Challenge, token)
 	if err != nil {
+		log.Printf("OAuth authorization code creation failed for client %s: %v", shortID(p.ClientID), err)
 		http.Error(w, "authorization failed", 500)
 		return
 	}
+	log.Printf("OAuth authorization succeeded for client %s after %s; redirecting to client", shortID(p.ClientID), time.Since(started).Round(time.Millisecond))
 	target, _ := url.Parse(p.RedirectURI)
 	q := target.Query()
 	q.Set("code", code)
@@ -250,4 +257,11 @@ func newMCPServer() *mcpserver.MCPServer {
 }
 func intArg(req mcp.CallToolRequest, key string) int {
 	return mcp.ParseInt(req, key, 0)
+}
+
+func shortID(value string) string {
+	if len(value) <= 8 {
+		return value
+	}
+	return value[:8]
 }
