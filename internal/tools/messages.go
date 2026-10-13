@@ -54,16 +54,14 @@ func HandleGetNotifications(ctx context.Context, client *api.Client, input GetNo
 	if err != nil {
 		return "", err
 	}
-	readType := "unread"
-	if !input.UnreadOnly {
-		readType = "both"
-	}
-
 	params := map[string]string{
 		"useridto":    fmt.Sprintf("%d", userID),
-		"type":        readType,
+		"type":        "notifications",
 		"limitnum":    fmt.Sprintf("%d", limit),
 		"newestfirst": "1",
+	}
+	if input.UnreadOnly {
+		params["read"] = "0"
 	}
 
 	data, err := client.Call(ctx, "core_message_get_messages", params)
