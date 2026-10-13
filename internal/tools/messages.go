@@ -50,7 +50,10 @@ func HandleGetNotifications(ctx context.Context, client *api.Client, input GetNo
 		limit = 20
 	}
 
-	userID := client.GetUserID()
+	userID, err := ensureUserID(ctx, client)
+	if err != nil {
+		return "", err
+	}
 	readType := "unread"
 	if !input.UnreadOnly {
 		readType = "both"

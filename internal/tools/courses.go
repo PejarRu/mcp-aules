@@ -38,9 +38,9 @@ func HandleListCourses(ctx context.Context, client *api.Client, _ ListCoursesInp
 		return "", api.ErrNotAuthenticated
 	}
 
-	userID := client.GetUserID()
-	if userID == 0 {
-		return "", fmt.Errorf("user ID not set — please run get_site_info first")
+	userID, err := ensureUserID(ctx, client)
+	if err != nil {
+		return "", err
 	}
 
 	params := map[string]string{
@@ -84,7 +84,10 @@ func HandleListCourses(ctx context.Context, client *api.Client, _ ListCoursesInp
 
 // Helper to get enrolled course IDs
 func getEnrolledCourseIDs(ctx context.Context, client *api.Client) ([]int, error) {
-	userID := client.GetUserID()
+	userID, err := ensureUserID(ctx, client)
+	if err != nil {
+		return nil, err
+	}
 	params := map[string]string{
 		"userid": fmt.Sprintf("%d", userID),
 	}

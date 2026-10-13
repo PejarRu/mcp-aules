@@ -46,7 +46,10 @@ func HandleGetGrades(ctx context.Context, client *api.Client, input GetGradesInp
 		return "", fmt.Errorf("course_id is required")
 	}
 
-	userID := client.GetUserID()
+	userID, err := ensureUserID(ctx, client)
+	if err != nil {
+		return "", err
+	}
 	params := map[string]string{
 		"courseid": fmt.Sprintf("%d", input.CourseID),
 		"userid":   fmt.Sprintf("%d", userID),

@@ -75,6 +75,21 @@ func getSiteInfoRaw(ctx context.Context, client *api.Client) (*SiteInfo, error) 
 
 type GetSiteInfoInput struct{}
 
+func ensureUserID(ctx context.Context, client *api.Client) (int, error) {
+	if userID := client.GetUserID(); userID != 0 {
+		return userID, nil
+	}
+	info, err := getSiteInfoRaw(ctx, client)
+	if err != nil {
+		return 0, fmt.Errorf("getting current user ID: %w", err)
+	}
+	if info.UserID == 0 {
+		return 0, fmt.Errorf("site info returned an invalid user ID")
+	}
+	client.SetUserID(info.UserID)
+	return info.UserID, nil
+}
+
 func HandleGetSiteInfo(ctx context.Context, client *api.Client, _ GetSiteInfoInput) (string, error) {
 	if !client.IsAuthenticated() {
 		return "", api.ErrNotAuthenticated
@@ -84,6 +99,7 @@ func HandleGetSiteInfo(ctx context.Context, client *api.Client, _ GetSiteInfoInp
 	if err != nil {
 		return "", err
 	}
+	client.SetUserID(info.UserID)
 
 	result, _ := json.MarshalIndent(info, "", "  ")
 	return string(result), nil
@@ -112,15 +128,9 @@ func HandleGetUserProfile(ctx context.Context, client *api.Client, _ GetUserProf
 		return "", api.ErrNotAuthenticated
 	}
 
-	userID := client.GetUserID()
-	if userID == 0 {
-		// Try to get it from site info
-		info, err := getSiteInfoRaw(ctx, client)
-		if err != nil {
-			return "", err
-		}
-		userID = info.UserID
-		client.SetUserID(userID)
+	userID, err := ensureUserID(ctx, client)
+	if err != nil {
+		return "", err
 	}
 
 	params := map[string]string{
