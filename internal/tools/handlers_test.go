@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Jawadh-Salih/moodle-mcp-server/internal/api"
+	"github.com/PejarRu/mcp-aules/internal/api"
 )
 
 // newTestClient creates an API client pointed at a mock HTTP server.

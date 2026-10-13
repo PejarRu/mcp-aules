@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jawadh/moodle-mcp-server/internal/api"
+	"github.com/PejarRu/mcp-aules/internal/api"
 )
 
 // --- Get Notifications Tool ---
@@ -23,12 +23,12 @@ type Message struct {
 }
 
 type MessageDisplay struct {
-	ID        int    `json:"id"`
-	From      string `json:"from"`
-	Subject   string `json:"subject"`
-	Preview   string `json:"preview"`
-	Date      string `json:"date"`
-	Read      bool   `json:"read"`
+	ID      int    `json:"id"`
+	From    string `json:"from"`
+	Subject string `json:"subject"`
+	Preview string `json:"preview"`
+	Date    string `json:"date"`
+	Read    bool   `json:"read"`
 }
 
 type MessagesResponse struct {
@@ -36,7 +36,7 @@ type MessagesResponse struct {
 }
 
 type GetNotificationsInput struct {
-	Limit    int  `json:"limit,omitempty" jsonschema:"description=Maximum number of notifications to return (default: 20)"`
+	Limit      int  `json:"limit,omitempty" jsonschema:"description=Maximum number of notifications to return (default: 20)"`
 	UnreadOnly bool `json:"unread_only,omitempty" jsonschema:"description=Only show unread notifications (default: true)"`
 }
 
@@ -57,10 +57,10 @@ func HandleGetNotifications(ctx context.Context, client *api.Client, input GetNo
 	}
 
 	params := map[string]string{
-		"useridto":     fmt.Sprintf("%d", userID),
-		"type":         readType,
-		"limitnum":     fmt.Sprintf("%d", limit),
-		"newestfirst":  "1",
+		"useridto":    fmt.Sprintf("%d", userID),
+		"type":        readType,
+		"limitnum":    fmt.Sprintf("%d", limit),
+		"newestfirst": "1",
 	}
 
 	data, err := client.Call(ctx, "core_message_get_messages", params)
@@ -96,24 +96,4 @@ func HandleGetNotifications(ctx context.Context, client *api.Client, input GetNo
 		"messages":       display,
 	}, "", "  ")
 	return string(result), nil
-}
-
-// stripHTML removes HTML tags from a string (simple implementation).
-func stripHTML(s string) string {
-	var result []byte
-	inTag := false
-	for i := 0; i < len(s); i++ {
-		if s[i] == '<' {
-			inTag = true
-			continue
-		}
-		if s[i] == '>' {
-			inTag = false
-			continue
-		}
-		if !inTag {
-			result = append(result, s[i])
-		}
-	}
-	return string(result)
 }

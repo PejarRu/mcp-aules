@@ -1,65 +1,51 @@
 package config
 
 import (
-	"fmt"
+	"errors"
 	"net/url"
 	"os"
 	"strings"
 )
 
-// Config holds the Moodle MCP server configuration.
+const DefaultMoodleURL = "https://aules.edu.gva.es/semipresencial"
+
 type Config struct {
-	MoodleURL string
-	Token     string
-	Username  string
-	Password  string
+	PublicBaseURL string
+	ListenAddr    string
+	DatabasePath  string
+	EncryptionKey string
+	MoodleURL     string
 }
 
-// LoadFromEnv loads configuration from environment variables.
-// All fields are optional at load time — the login tool can provide them at runtime.
-func LoadFromEnv() *Config {
-	return &Config{
-		MoodleURL: normalizeURL(os.Getenv("MOODLE_URL")),
-		Token:     os.Getenv("MOODLE_TOKEN"),
-		Username:  os.Getenv("MOODLE_USERNAME"),
-		Password:  os.Getenv("MOODLE_PASSWORD"),
+func LoadFromEnv() Config {
+	return Config{
+		PublicBaseURL: strings.TrimRight(os.Getenv("PUBLIC_BASE_URL"), "/"),
+		ListenAddr:    envOr("LISTEN_ADDR", ":8080"),
+		DatabasePath:  envOr("DATABASE_PATH", "/data/moodle-mcp.db"),
+		EncryptionKey: os.Getenv("AULES_ENCRYPTION_KEY"),
+		MoodleURL:     envOr("MOODLE_URL", DefaultMoodleURL),
 	}
 }
 
-// HasAuth returns true if the config has enough info to authenticate.
-func (c *Config) HasAuth() bool {
-	if c.MoodleURL == "" {
-		return false
+func envOr(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
 	}
-	return c.Token != "" || (c.Username != "" && c.Password != "")
+	return fallback
 }
 
-// Validate checks that the config has a valid Moodle URL if one is set.
-func (c *Config) Validate() error {
-	if c.MoodleURL == "" {
-		return nil // URL can be provided later via login tool
+func (c Config) Validate() error {
+	if c.PublicBaseURL == "" || c.EncryptionKey == "" {
+		return errors.New("PUBLIC_BASE_URL and AULES_ENCRYPTION_KEY are required")
 	}
-	u, err := url.Parse(c.MoodleURL)
-	if err != nil {
-		return fmt.Errorf("invalid MOODLE_URL: %w", err)
+	for _, raw := range []string{c.PublicBaseURL, c.MoodleURL} {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || u.Host == "" {
+			return errors.New("public and Moodle URLs must be valid HTTPS URLs")
+		}
 	}
-	if u.Scheme != "https" && u.Scheme != "http" {
-		return fmt.Errorf("MOODLE_URL must use http or https scheme, got %q", u.Scheme)
-	}
-	if u.Host == "" {
-		return fmt.Errorf("MOODLE_URL must have a host")
+	if c.MoodleURL != DefaultMoodleURL {
+		return errors.New("MOODLE_URL must be https://aules.edu.gva.es/semipresencial")
 	}
 	return nil
-}
-
-func normalizeURL(rawURL string) string {
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" {
-		return ""
-	}
-	rawURL = strings.TrimRight(rawURL, "/")
-	if !strings.HasPrefix(rawURL, "http://") && !strings.HasPrefix(rawURL, "https://") {
-		rawURL = "https://" + rawURL
-	}
-	return rawURL
 }

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jawadh/moodle-mcp-server/internal/api"
+	"github.com/PejarRu/mcp-aules/internal/api"
 )
 
 // --- List Courses Tool ---

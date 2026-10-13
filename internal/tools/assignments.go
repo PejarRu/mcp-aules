@@ -6,21 +6,21 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jawadh/moodle-mcp-server/internal/api"
+	"github.com/PejarRu/mcp-aules/internal/api"
 )
 
 // --- Get Assignments Tool ---
 
 type Assignment struct {
-	ID          int    `json:"id"`
-	CMID        int    `json:"cmid"`
-	Name        string `json:"name"`
-	DueDate     int64  `json:"duedate"`
-	CutoffDate  int64  `json:"cutoffdate"`
-	AllowFrom   int64  `json:"allowsubmissionsfromdate"`
-	Grade       int    `json:"grade"`
-	Intro       string `json:"intro"`
-	NoSubmit    int    `json:"nosubmissions"`
+	ID         int    `json:"id"`
+	CMID       int    `json:"cmid"`
+	Name       string `json:"name"`
+	DueDate    int64  `json:"duedate"`
+	CutoffDate int64  `json:"cutoffdate"`
+	AllowFrom  int64  `json:"allowsubmissionsfromdate"`
+	Grade      int    `json:"grade"`
+	Intro      string `json:"intro"`
+	NoSubmit   int    `json:"nosubmissions"`
 }
 
 type AssignmentDisplay struct {
@@ -174,8 +174,8 @@ func HandleGetUpcomingAssignments(ctx context.Context, client *api.Client, input
 	}
 
 	result, _ := json.MarshalIndent(map[string]interface{}{
-		"days_ahead":          daysAhead,
-		"upcoming_count":      len(upcoming),
+		"days_ahead":           daysAhead,
+		"upcoming_count":       len(upcoming),
 		"upcoming_assignments": upcoming,
 	}, "", "  ")
 	return string(result), nil
@@ -201,10 +201,10 @@ func HandleSubmitAssignment(ctx context.Context, client *api.Client, input Submi
 	}
 
 	params := map[string]string{
-		"assignmentid":                           fmt.Sprintf("%d", input.AssignmentID),
-		"plugindata[onlinetext_editor][text]":     input.Text,
-		"plugindata[onlinetext_editor][format]":   "1", // HTML format
-		"plugindata[onlinetext_editor][itemid]":   "0",
+		"assignmentid":                          fmt.Sprintf("%d", input.AssignmentID),
+		"plugindata[onlinetext_editor][text]":   input.Text,
+		"plugindata[onlinetext_editor][format]": "1", // HTML format
+		"plugindata[onlinetext_editor][itemid]": "0",
 	}
 
 	_, err := client.Call(ctx, "mod_assign_save_submission", params)
@@ -236,7 +236,7 @@ func HandleUpdateAssignment(ctx context.Context, client *api.Client, input Updat
 	}
 
 	params := map[string]string{
-		"assignmentid":                         fmt.Sprintf("%d", input.AssignmentID),
+		"assignmentid":                          fmt.Sprintf("%d", input.AssignmentID),
 		"plugindata[onlinetext_editor][text]":   input.Text,
 		"plugindata[onlinetext_editor][format]": "1",
 		"plugindata[onlinetext_editor][itemid]": "0",
@@ -308,11 +308,4 @@ func HandleSubmitJournal(ctx context.Context, client *api.Client, input SubmitJo
 
 	return fmt.Sprintf("Journal %d entry saved successfully at %s",
 		input.JournalID, time.Now().Format("2006-01-02 15:04:05")), nil
-}
-
-func truncate(s string, max int) string {
-	if len(s) <= max {
-		return s
-	}
-	return s[:max] + "..."
 }

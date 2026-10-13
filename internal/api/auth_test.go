@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Jawadh-Salih/moodle-mcp-server/internal/api"
+	"github.com/PejarRu/mcp-aules/internal/api"
 )
 
 func TestGetTokenFromCredentials_Success(t *testing.T) {

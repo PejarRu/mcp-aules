@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/jawadh/moodle-mcp-server/internal/api"
-	"github.com/jawadh/moodle-mcp-server/internal/tools"
+	"github.com/PejarRu/mcp-aules/internal/api"
+	"github.com/PejarRu/mcp-aules/internal/tools"
 )
 
 // RESTServer wraps the Moodle API client and exposes it via HTTP REST API.
@@ -33,11 +33,11 @@ func NewRESTServer(client *api.Client, port int) *RESTServer {
 // Run starts the REST server.
 func (s *RESTServer) Run(ctx context.Context) error {
 	httpServer := &http.Server{
-		Addr:    fmt.Sprintf(":%d", s.port),
+		Addr:    fmt.Sprintf("127.0.0.1:%d", s.port),
 		Handler: s.mux,
 	}
 	log.Printf("REST API listening on http://localhost:%d", s.port)
-	log.Println("OpenAPI docs: http://localhost:%d/api/docs", s.port)
+	log.Printf("OpenAPI docs: http://localhost:%d/api/docs", s.port)
 	return httpServer.ListenAndServe()
 }
 
@@ -69,10 +69,7 @@ func (s *RESTServer) registerRoutes() {
 	// Assignments
 	s.mux.HandleFunc("/api/assignments", s.handleGetAssignments)
 	s.mux.HandleFunc("/api/assignments/upcoming", s.handleUpcomingAssignments)
-	s.mux.HandleFunc("/api/assignments/submit", s.handleSubmitAssignment)
-	s.mux.HandleFunc("/api/assignments/update", s.handleUpdateAssignment)
 	s.mux.HandleFunc("/api/journal/entry", s.handleGetJournalEntry)
-	s.mux.HandleFunc("/api/journal/submit", s.handleSubmitJournal)
 
 	// Calendar
 	s.mux.HandleFunc("/api/calendar/events", s.handleCalendarEvents)
@@ -87,7 +84,7 @@ func (s *RESTServer) registerRoutes() {
 func (s *RESTServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status": "ok",
+		"status":        "ok",
 		"authenticated": s.client.IsAuthenticated(),
 	})
 }

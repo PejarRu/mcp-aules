@@ -1,33 +1,14 @@
-FROM golang:1.22-alpine AS builder
-
-WORKDIR /build
-
-# Copy go mod files
+FROM golang:1.26-alpine AS builder
+WORKDIR /src
 COPY go.mod go.sum ./
-
-# Download dependencies
 RUN go mod download
-
-# Copy source code
 COPY . .
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /moodle-mcp ./cmd/moodle-mcp
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -o moodle-mcp ./cmd/moodle-mcp/
-
-# Final stage
-FROM alpine:latest
-
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates
-
-WORKDIR /app
-
-# Copy binary from builder
-COPY --from=builder /build/moodle-mcp .
-
-# Port for REST API
-ENV PORT=8080
+FROM alpine:3.22
+RUN apk add --no-cache ca-certificates && addgroup -S app && adduser -S -G app app
+COPY --from=builder /moodle-mcp /usr/local/bin/moodle-mcp
+RUN mkdir /data && chown app:app /data
+USER app
 EXPOSE 8080
-
-# Default to REST mode
-CMD ["./moodle-mcp", "-mode", "rest", "-port", "8080"]
+ENTRYPOINT ["/usr/local/bin/moodle-mcp"]

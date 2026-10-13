@@ -1,0 +1,28 @@
+services:
+  moodle-mcp:
+    build: .
+    restart: unless-stopped
+    environment:
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-https://anton.aules.mcp.development.antonberzins.com}
+      LISTEN_ADDR: :8080
+      DATABASE_PATH: /data/moodle-mcp.db
+      AULES_ENCRYPTION_KEY: ${AULES_ENCRYPTION_KEY:?required}
+      MOODLE_URL: https://aules.edu.gva.es/semipresencial
+    volumes:
+      - moodle-mcp-data:/data
+    networks:
+      - dokploy-network
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.moodle-mcp.rule=Host(`anton.aules.mcp.development.antonberzins.com`)
+      - traefik.http.routers.moodle-mcp.entrypoints=websecure
+      - traefik.http.routers.moodle-mcp.tls.certresolver=letsencrypt
+      - traefik.docker.network=dokploy-network
+      - traefik.http.services.moodle-mcp.loadbalancer.server.port=8080
+
+volumes:
+  moodle-mcp-data:
+
+networks:
+  dokploy-network:
+    external: true

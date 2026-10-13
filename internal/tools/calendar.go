@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	"github.com/jawadh/moodle-mcp-server/internal/api"
+	"github.com/PejarRu/mcp-aules/internal/api"
 )
 
 // --- Get Calendar Events Tool ---
@@ -24,13 +24,13 @@ type CalendarEvent struct {
 }
 
 type CalendarEventDisplay struct {
-	ID         int    `json:"id"`
-	Name       string `json:"name"`
-	Type       string `json:"type"`
-	Course     string `json:"course,omitempty"`
-	Date       string `json:"date"`
-	Time       string `json:"time"`
-	Module     string `json:"module,omitempty"`
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Course string `json:"course,omitempty"`
+	Date   string `json:"date"`
+	Time   string `json:"time"`
+	Module string `json:"module,omitempty"`
 }
 
 type CalendarResponse struct {

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/jawadh/moodle-mcp-server/internal/api"
+	"github.com/PejarRu/mcp-aules/internal/api"
 )
 
 // --- Login Tool ---
@@ -124,7 +124,7 @@ func HandleGetUserProfile(ctx context.Context, client *api.Client, _ GetUserProf
 	}
 
 	params := map[string]string{
-		"field": "id",
+		"field":     "id",
 		"values[0]": fmt.Sprintf("%d", userID),
 	}
 

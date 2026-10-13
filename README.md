@@ -1,238 +1,71 @@
-# Moodle MCP Server
+# Aules MCP Server
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io) server + REST API that connects **Claude, ChatGPT, Google Gemini, and any AI model** to any Moodle LMS instance. Built in Go.
+Servidor remoto Model Context Protocol para consultar Aules mediante OAuth 2.1. Cada usuario inicia sesión en Aules desde el navegador; su token Aules se cifra en SQLite y recibe un bearer MCP independiente.
 
-Students can interact with their Moodle account through their favorite AI — view courses, check grades, track deadlines, submit assignments, and read notifications.
+## Endpoints
 
-**Works with:**
-- ✅ **Claude** (Desktop, Code) - via MCP (easiest!)
-- ✅ **ChatGPT** (Plus) - via REST API + Actions
-- ✅ **Google Gemini** - via REST API + Apps Script
-- ✅ **Any AI** - via REST API (HTTP endpoints)
+- `POST /mcp`: Streamable HTTP stateless, protegido por bearer.
+- `GET /health`: health check (`204`).
+- `GET /.well-known/oauth-authorization-server`: discovery OAuth.
+- `GET /.well-known/oauth-protected-resource`: metadata del recurso MCP.
+- `POST /register`: Dynamic Client Registration para clientes públicos.
+- `GET|POST /authorize`: Authorization Code y login web Aules.
+- `POST /token`: canje de código con PKCE S256.
+- `POST /revoke`: revocación de bearer.
 
-## Features
+Solo se publican tools de lectura: perfil, cursos, contenidos, notas, tareas, recursos, calendario, plazos y notificaciones. No se publican login MCP, descargas ni operaciones mutadoras.
 
-| Tool | Description |
-|------|-------------|
-| `login` | Authenticate with your Moodle site interactively |
-| `get_site_info` | View Moodle site and user info |
-| `get_user_profile` | View your profile details |
-| `list_courses` | List all enrolled courses |
-| `get_course_contents` | View sections, resources, and activities |
-| `get_course_details` | View course metadata |
-| `get_grades` | View grades for a specific course |
-| `get_grades_overview` | View grade summary across all courses |
-| `get_assignments` | View assignments for a course |
-| `get_upcoming_assignments` | View upcoming assignments across all courses |
-| `submit_assignment` | Submit text content for an assignment |
-| `get_calendar_events` | View upcoming calendar events |
-| `get_upcoming_deadlines` | View consolidated deadlines sorted by urgency |
-| `get_notifications` | View messages and notifications |
+## Configuración
 
-## Requirements
+| Variable | Uso |
+|---|---|
+| `PUBLIC_BASE_URL` | URL HTTPS pública, sin `/` final |
+| `AULES_ENCRYPTION_KEY` | Clave AES-256: 32 bytes codificados en base64 |
+| `LISTEN_ADDR` | Dirección HTTP; default `:8080` |
+| `DATABASE_PATH` | SQLite; default `/data/moodle-mcp.db` |
+| `MOODLE_URL` | Fijo en `https://aules.edu.gva.es` |
 
-- Claude Desktop (macOS, Windows, or Linux)
-- A Moodle account at any institution
+Generar clave:
 
-## Quick Start
-
-**Choose your AI platform:**
-
-| Your AI | Guide | Time |
-|---------|-------|------|
-| 🤖 **Claude** (Recommended) | [Windows](WINDOWS_SETUP.md) / [macOS](MAC_SETUP.md) | 2 min |
-| 💬 **ChatGPT** | [ChatGPT Setup](CHATGPT_SETUP.md) | 15 min |
-| 🔍 **Google Gemini** | [Gemini Setup](GEMINI_SETUP.md) / [Gemini Windows](GEMINI_WINDOWS_SETUP.md) | 20 min |
-| 🌐 **Multiple AIs** | [All Models Guide](ALL_MODELS_SETUP.md) | 1 hour |
-
-**Start here:** If you use Claude, follow the Windows/macOS guide above (2 minutes!)
-
-**Not a coder?** All guides have step-by-step instructions with no technical knowledge needed.
-
----
-
-## Installation (Easiest)
-
-### For Windows (PowerShell)
-
-Open PowerShell and run:
-
-```powershell
-irm https://raw.githubusercontent.com/Jawadh-Salih/moodle-mcp-server/main/install.ps1 | iex
+```sh
+openssl rand -base64 32
 ```
 
-This will automatically download and install the binary to `C:\Users\YourName\moodle-mcp\moodle-mcp.exe`
+No reutilizar ni publicar la clave. Perderla impide descifrar sesiones existentes.
 
-### For macOS / Linux (Bash)
+## Desarrollo
 
-Open Terminal and run:
+Requiere Go 1.26.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Jawadh-Salih/moodle-mcp-server/main/install.sh | bash
+```sh
+go test -race ./...
+go vet ./...
+go build ./cmd/moodle-mcp
 ```
 
-This will automatically download and install the binary to `~/.moodle-mcp/moodle-mcp`
+Ejecución local HTTPS requiere proxy inverso y variables anteriores:
 
-### Manual Installation (For Developers)
-
-If you want to build from source:
-
-```bash
-# Clone the repository
-git clone https://github.com/Jawadh-Salih/moodle-mcp-server.git
-cd moodle-mcp-server
-
-# Build the binary
-go mod tidy
-go build -o moodle-mcp ./cmd/moodle-mcp/
+```sh
+go run ./cmd/moodle-mcp
 ```
 
-## Usage
+## Docker y Traefik
 
-### Option 1: Interactive Login (Recommended)
+`compose.yaml` usa red externa `traefik`, volumen persistente y dominio `anton.aules.mcp.development.antonberzins.com`.
 
-Just start the server with no configuration. When you chat with Claude, use the `login` tool to authenticate:
-
-> "Log in to my Moodle at https://online.uom.lk with username student@uom.lk"
-
-Claude will ask for your password and authenticate you.
-
-### Option 2: Environment Variables
-
-Set credentials as environment variables for automatic login:
-
-```bash
-export MOODLE_URL=https://online.uom.lk
-export MOODLE_USERNAME=your-username
-export MOODLE_PASSWORD=your-password
+```sh
+cp .env.example .env
+# Sustituir AULES_ENCRYPTION_KEY
+docker compose up -d --build
 ```
 
-Or if you have a Moodle API token:
+Traefik debe tener red `traefik`, entrypoint `websecure` y gestión TLS configurados. El contenedor corre sin root y no publica puerto directamente.
 
-```bash
-export MOODLE_URL=https://online.uom.lk
-export MOODLE_TOKEN=your-api-token
-```
+## Flujo OAuth
 
-## Claude Desktop Configuration
-
-### If you used the auto-installer:
-
-The installer will show you the exact path. Just copy it!
-
-### Manual Configuration
-
-Find your Claude Desktop config file:
-
-**macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-**Linux:** `~/.config/Claude/claude_desktop_config.json`
-
-#### Option A: Interactive login (Recommended - no credentials in config)
-
-```json
-{
-  "mcpServers": {
-    "moodle": {
-      "command": "/path/to/moodle-mcp"
-    }
-  }
-}
-```
-
-Then in Claude, use the `login` tool to authenticate interactively.
-
-#### Option B: With credentials stored
-
-```json
-{
-  "mcpServers": {
-    "moodle": {
-      "command": "/path/to/moodle-mcp",
-      "env": {
-        "MOODLE_URL": "https://online.uom.lk",
-        "MOODLE_USERNAME": "your-username",
-        "MOODLE_PASSWORD": "your-password"
-      }
-    }
-  }
-}
-```
-
-**Windows example paths:**
-- Auto-installer: `C:\Users\YourName\moodle-mcp\moodle-mcp.exe`
-- Manual build: `C:\Users\YourName\Go\bin\moodle-mcp.exe`
-
-**macOS example paths:**
-- Auto-installer: `/Users/yourname/.moodle-mcp/moodle-mcp`
-- Manual build: `/Users/yourname/moodle-mcp-server/moodle-mcp`
-
-## Supports Multiple AI Platforms
-
-### Via MCP (Claude Only)
-- ✅ Claude Desktop (macOS, Windows, Linux)
-- ✅ Claude Code (VSCode, terminal)
-
-### Via REST API (ChatGPT, Gemini, Any AI)
-- ✅ ChatGPT (with Custom GPT Actions)
-- ✅ Google Gemini (with Apps Script)
-- ✅ Any AI with HTTP client access
-- ✅ Custom scripts and integrations
-
-See [All Models Setup](ALL_MODELS_SETUP.md) for detailed instructions for each platform.
-
-## Running the REST API Server
-
-For ChatGPT, Gemini, or other AI models, run the REST API mode:
-
-```bash
-# Start REST API server
-go run ./cmd/moodle-mcp/ -mode rest -port 8080
-
-# Or if you built the binary:
-./moodle-mcp -mode rest -port 8080
-
-# View API docs
-curl http://localhost:8080/api/docs
-```
-
-The server listens on `http://localhost:8080` and exposes REST endpoints:
-- `POST /api/login` - Authenticate
-- `GET /api/courses` - List courses
-- `GET /api/grades?course_id=123` - Get grades
-- `GET /api/assignments/upcoming` - Upcoming assignments
-- And more!
-
-For production (ChatGPT/Gemini), deploy to cloud:
-- [Google Cloud Run](DEPLOYMENT_GUIDE.md) (Recommended for Gemini)
-- [Heroku](DEPLOYMENT_GUIDE.md) (Simplest)
-- [DigitalOcean](DEPLOYMENT_GUIDE.md) (Most control)
-
----
-
-## Example Conversations
-
-Once connected, you can ask Claude things like:
-
-- "Show me my enrolled courses"
-- "What are my grades in CS101?"
-- "What assignments are due this week?"
-- "Show me the contents of my Data Structures course"
-- "Do I have any unread notifications?"
-- "What deadlines are coming up in the next 7 days?"
-
-## How It Works
-
-This server uses Moodle's [Web Services REST API](https://docs.moodle.org/dev/Web_service_API_functions) with the `moodle_mobile_app` service token. This service is enabled by default on most Moodle installations, so no admin setup is needed.
-
-## Troubleshooting
-
-**"Invalid login" error:** Double-check your username and password. Some institutions use email as username, others use a separate ID.
-
-**"Web service not available" error:** Your Moodle admin may have disabled the mobile web service. Ask them to enable it under *Site administration > Plugins > Web services > Mobile*.
-
-**Grades not showing:** The grade report API requires the `gradereport/user:view` capability, which is standard for students but may be restricted on some sites.
-
-## License
-
-MIT
+1. Cliente obtiene metadata y se registra con `redirect_uris` HTTPS (localhost HTTP permitido para clientes nativos).
+2. Cliente abre `/authorize` con `response_type=code`, `client_id`, `redirect_uri`, `state`, `code_challenge` y `code_challenge_method=S256`.
+3. Usuario introduce credenciales Aules en formulario HTTPS. Credenciales no se persisten.
+4. Código dura 5 minutos y tiene un solo uso. `/token` exige `grant_type=authorization_code` y `code_verifier`.
+5. Bearer MCP dura 1 hora. Token Aules permanece cifrado en SQLite con AES-256-GCM.
+6. `/revoke` invalida bearer MCP.

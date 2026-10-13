@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jawadh/moodle-mcp-server/internal/api"
+	"github.com/PejarRu/mcp-aules/internal/api"
 )
 
 // --- Resource types ---
@@ -88,9 +88,9 @@ func HandleListResources(ctx context.Context, client *api.Client, input ListReso
 	}
 
 	result, _ := json.MarshalIndent(map[string]interface{}{
-		"course_id":      input.CourseID,
-		"total_files":    len(resources),
-		"resources":      resources,
+		"course_id":   input.CourseID,
+		"total_files": len(resources),
+		"resources":   resources,
 	}, "", "  ")
 	return string(result), nil
 }

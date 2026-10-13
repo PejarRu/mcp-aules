@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // GetTokenFromCredentials authenticates with Moodle and returns an API token.
@@ -20,11 +21,11 @@ func GetTokenFromCredentials(ctx context.Context, baseURL, username, password st
 		"service":  {"moodle_mobile_app"},
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(params.Encode()))
 	if err != nil {
 		return "", fmt.Errorf("creating auth request: %w", err)
 	}
-	req.URL.RawQuery = params.Encode()
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

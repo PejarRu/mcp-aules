@@ -86,9 +86,9 @@ func (c *Client) Call(ctx context.Context, function string, params map[string]st
 	endpoint := fmt.Sprintf("%s/webservice/rest/server.php", baseURL)
 
 	qp := url.Values{
-		"wstoken":             {token},
-		"wsfunction":          {function},
-		"moodlewsrestformat":  {"json"},
+		"wstoken":            {token},
+		"wsfunction":         {function},
+		"moodlewsrestformat": {"json"},
 	}
 	for k, v := range params {
 		qp.Set(k, v)

@@ -3,462 +3,245 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
+	"html/template"
 	"log"
-	"os"
-	"strconv"
+	"net/http"
+	"net/url"
+	"time"
 
-	"github.com/jawadh/moodle-mcp-server/internal/api"
-	"github.com/jawadh/moodle-mcp-server/internal/config"
-	"github.com/jawadh/moodle-mcp-server/internal/server"
-	"github.com/jawadh/moodle-mcp-server/internal/tools"
+	"github.com/PejarRu/mcp-aules/internal/api"
+	"github.com/PejarRu/mcp-aules/internal/config"
+	"github.com/PejarRu/mcp-aules/internal/oauth"
+	"github.com/PejarRu/mcp-aules/internal/tools"
 	"github.com/mark3labs/mcp-go/mcp"
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
-func main() {
-	// Parse command line flags
-	mode := flag.String("mode", "mcp", "Server mode: 'mcp' for Claude, 'rest' for HTTP API, 'both' for both")
-	restPort := flag.Int("port", 8080, "REST API port (default: 8080)")
-	flag.Parse()
+type clientKey struct{}
+type app struct {
+	cfg   config.Config
+	store *oauth.Store
+	mcp   http.Handler
+}
+type authPage struct{ ClientID, RedirectURI, State, Challenge, ChallengeMethod, Error string }
 
-	// Load config from environment
+var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Acceso Aules</title></head><body><main><h1>Conectar Aules</h1>{{if .Error}}<p role="alert">{{.Error}}</p>{{end}}<form method="post" action="/authorize"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="state" value="{{.State}}"><input type="hidden" name="code_challenge" value="{{.Challenge}}"><input type="hidden" name="code_challenge_method" value="{{.ChallengeMethod}}"><label>Usuario <input name="username" autocomplete="username" required></label><label>Contraseña <input type="password" name="password" autocomplete="current-password" required></label><button type="submit">Conectar</button></form></main></body></html>`))
+
+func main() {
 	cfg := config.LoadFromEnv()
 	if err := cfg.Validate(); err != nil {
-		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
+	store, err := oauth.Open(cfg.DatabasePath, cfg.EncryptionKey)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer store.Close()
+	a := &app{cfg: cfg, store: store}
+	a.mcp = mcpserver.NewStreamableHTTPServer(newMCPServer(), mcpserver.WithStateLess(true))
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", a.authorizationMetadata)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", a.resourceMetadata)
+	mux.HandleFunc("POST /register", a.register)
+	mux.HandleFunc("GET /authorize", a.authorizeGet)
+	mux.HandleFunc("POST /authorize", a.authorizePost)
+	mux.HandleFunc("POST /token", a.token)
+	mux.HandleFunc("POST /revoke", a.revoke)
+	mux.Handle("/mcp", a.bearer(http.HandlerFunc(a.mcp.ServeHTTP)))
+	srv := &http.Server{Addr: cfg.ListenAddr, Handler: securityHeaders(mux), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}
+	log.Printf("listening on %s", cfg.ListenAddr)
+	log.Fatal(srv.ListenAndServe())
+}
 
-	// Allow port override via env var
-	if envPort := os.Getenv("REST_API_PORT"); envPort != "" {
-		if p, err := strconv.Atoi(envPort); err == nil {
-			*restPort = p
+func writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(value)
+}
+func (a *app) authorizationMetadata(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, map[string]any{"issuer": a.cfg.PublicBaseURL, "authorization_endpoint": a.cfg.PublicBaseURL + "/authorize", "token_endpoint": a.cfg.PublicBaseURL + "/token", "registration_endpoint": a.cfg.PublicBaseURL + "/register", "revocation_endpoint": a.cfg.PublicBaseURL + "/revoke", "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code"}, "code_challenge_methods_supported": []string{"S256"}, "token_endpoint_auth_methods_supported": []string{"none"}})
+}
+func (a *app) resourceMetadata(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, 200, map[string]any{"resource": a.cfg.PublicBaseURL + "/mcp", "authorization_servers": []string{a.cfg.PublicBaseURL}, "bearer_methods_supported": []string{"header"}})
+}
+func (a *app) register(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		RedirectURIs []string `json:"redirect_uris"`
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&in) != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid_client_metadata"})
+		return
+	}
+	c, err := a.store.Register(in.RedirectURIs)
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid_client_metadata", "error_description": err.Error()})
+		return
+	}
+	writeJSON(w, 201, map[string]any{"client_id": c.ID, "redirect_uris": c.RedirectURIs, "token_endpoint_auth_method": "none"})
+}
+func authInput(r *http.Request) authPage {
+	return authPage{ClientID: r.FormValue("client_id"), RedirectURI: r.FormValue("redirect_uri"), State: r.FormValue("state"), Challenge: r.FormValue("code_challenge"), ChallengeMethod: r.FormValue("code_challenge_method")}
+}
+func (a *app) validateAuth(p authPage, responseType string) error {
+	if responseType != "code" {
+		return fmt.Errorf("response_type must be code")
+	}
+	if err := a.store.ValidateClient(p.ClientID, p.RedirectURI); err != nil {
+		return err
+	}
+	return oauth.ValidatePKCE(p.Challenge, p.ChallengeMethod)
+}
+func (a *app) authorizeGet(w http.ResponseWriter, r *http.Request) {
+	p := authInput(r)
+	if err := a.validateAuth(p, r.URL.Query().Get("response_type")); err != nil {
+		http.Error(w, "invalid authorization request", 400)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	loginTemplate.Execute(w, p)
+}
+func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if r.ParseForm() != nil {
+		http.Error(w, "invalid request", 400)
+		return
+	}
+	p := authInput(r)
+	if err := a.validateAuth(p, "code"); err != nil {
+		http.Error(w, "invalid authorization request", 400)
+		return
+	}
+	token, err := api.GetTokenFromCredentials(r.Context(), a.cfg.MoodleURL, r.FormValue("username"), r.FormValue("password"))
+	if err != nil {
+		p.Error = "Credenciales no válidas"
+		w.WriteHeader(401)
+		loginTemplate.Execute(w, p)
+		return
+	}
+	code, err := a.store.CreateCode(p.ClientID, p.RedirectURI, p.Challenge, token)
+	if err != nil {
+		http.Error(w, "authorization failed", 500)
+		return
+	}
+	target, _ := url.Parse(p.RedirectURI)
+	q := target.Query()
+	q.Set("code", code)
+	if p.State != "" {
+		q.Set("state", p.State)
+	}
+	target.RawQuery = q.Encode()
+	http.Redirect(w, r, target.String(), http.StatusFound)
+}
+func (a *app) token(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if r.ParseForm() != nil || r.FormValue("grant_type") != "authorization_code" {
+		writeJSON(w, 400, map[string]string{"error": "invalid_request"})
+		return
+	}
+	token, expires, err := a.store.Exchange(r.FormValue("code"), r.FormValue("client_id"), r.FormValue("redirect_uri"), r.FormValue("code_verifier"))
+	if err != nil {
+		writeJSON(w, 400, map[string]string{"error": "invalid_grant"})
+		return
+	}
+	writeJSON(w, 200, map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": expires - time.Now().Unix()})
+}
+func (a *app) revoke(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
+	if r.ParseForm() == nil {
+		a.store.Revoke(r.FormValue("token"))
+	}
+	w.WriteHeader(200)
+}
+func (a *app) bearer(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bearer, err := oauth.Bearer(r.Header.Get("Authorization"))
+		if err != nil {
+			unauthorized(w, a.cfg.PublicBaseURL)
+			return
 		}
-	}
-
-	// Create the Moodle API client
-	client := api.NewClient()
-
-	// If credentials are provided via env vars, authenticate now
-	ctx := context.Background()
-	if cfg.HasAuth() {
-		token := cfg.Token
-		if token == "" {
-			var err error
-			token, err = api.GetTokenFromCredentials(ctx, cfg.MoodleURL, cfg.Username, cfg.Password)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "authentication failed: %v\n", err)
-				os.Exit(1)
-			}
+		moodleToken, err := a.store.AulesToken(bearer)
+		if err != nil {
+			unauthorized(w, a.cfg.PublicBaseURL)
+			return
 		}
-		client.SetSession(cfg.MoodleURL, token)
-
-		// Get user ID from site info
-		if data, err := client.Call(ctx, "core_webservice_get_site_info", nil); err == nil {
-			var info struct {
-				UserID int `json:"userid"`
-			}
-			if json.Unmarshal(data, &info) == nil {
-				client.SetUserID(info.UserID)
-			}
-		}
-	}
-
-	// Run the appropriate server(s)
-	switch *mode {
-	case "mcp":
-		runMCPServer(client)
-	case "rest":
-		runRESTServer(client, *restPort)
-	case "both":
-		log.Println("Running both MCP and REST servers (experimental)")
-		go runRESTServer(client, *restPort)
-		runMCPServer(client)
-	default:
-		fmt.Fprintf(os.Stderr, "Unknown mode: %s\n", *mode)
-		os.Exit(1)
-	}
+		client := api.NewClient()
+		client.SetSession(a.cfg.MoodleURL, moodleToken)
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, client)))
+	})
 }
+func unauthorized(w http.ResponseWriter, base string) {
+	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource"`, base))
+	writeJSON(w, 401, map[string]string{"error": "invalid_token"})
+}
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; form-action 'self'; style-src 'unsafe-inline'")
+		next.ServeHTTP(w, r)
+	})
+}
+func requestClient(ctx context.Context) *api.Client { return ctx.Value(clientKey{}).(*api.Client) }
 
-func runMCPServer(client *api.Client) {
-	// Create MCP server
-	s := mcpserver.NewMCPServer(
-		"moodle-mcp-server",
-		"1.2.0",
-		mcpserver.WithToolCapabilities(true),
-	)
-
-	// Register all tools
-	registerTools(s, client)
-
-	// Run the server over stdio
-	log.Println("Moodle MCP Server starting...")
-	if err := mcpserver.ServeStdio(s); err != nil {
-		fmt.Fprintf(os.Stderr, "server error: %v\n", err)
-		os.Exit(1)
+func newMCPServer() *mcpserver.MCPServer {
+	s := mcpserver.NewMCPServer("moodle-mcp-server", "2.0.0", mcpserver.WithToolCapabilities(true))
+	add := func(tool mcp.Tool, fn func(context.Context, mcp.CallToolRequest, *api.Client) (string, error)) {
+		s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			out, err := fn(ctx, req, requestClient(ctx))
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(out), nil
+		})
 	}
-}
-
-func runRESTServer(client *api.Client, port int) {
-	restSrv := server.NewRESTServer(client, port)
-	log.Printf("Starting REST API on port %d", port)
-	log.Printf("OpenAPI docs at http://localhost:%d/api/docs", port)
-	if err := restSrv.Run(context.Background()); err != nil {
-		fmt.Fprintf(os.Stderr, "REST server error: %v\n", err)
-		os.Exit(1)
+	add(mcp.NewTool("get_site_info", mcp.WithDescription("Get Moodle site information")), func(c context.Context, _ mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetSiteInfo(c, a, tools.GetSiteInfoInput{})
+	})
+	add(mcp.NewTool("get_user_profile", mcp.WithDescription("Get current user profile")), func(c context.Context, _ mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetUserProfile(c, a, tools.GetUserProfileInput{})
+	})
+	add(mcp.NewTool("list_courses", mcp.WithDescription("List enrolled courses")), func(c context.Context, _ mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleListCourses(c, a, tools.ListCoursesInput{})
+	})
+	course := func(name, desc string, fn func(context.Context, *api.Client, int) (string, error)) {
+		add(mcp.NewTool(name, mcp.WithDescription(desc), mcp.WithNumber("course_id", mcp.Required())), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+			return fn(c, a, intArg(r, "course_id"))
+		})
 	}
+	course("get_course_contents", "Get course sections and activities", func(c context.Context, a *api.Client, id int) (string, error) {
+		return tools.HandleGetCourseContents(c, a, tools.GetCourseContentsInput{CourseID: id})
+	})
+	course("get_course_details", "Get course details", func(c context.Context, a *api.Client, id int) (string, error) {
+		return tools.HandleGetCourseDetails(c, a, tools.GetCourseDetailsInput{CourseID: id})
+	})
+	course("get_grades", "Get course grades", func(c context.Context, a *api.Client, id int) (string, error) {
+		return tools.HandleGetGrades(c, a, tools.GetGradesInput{CourseID: id})
+	})
+	add(mcp.NewTool("get_grades_overview", mcp.WithDescription("Get grades overview")), func(c context.Context, _ mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetGradesOverview(c, a, tools.GetGradesOverviewInput{})
+	})
+	course("get_assignments", "Get course assignments", func(c context.Context, a *api.Client, id int) (string, error) {
+		return tools.HandleGetAssignments(c, a, tools.GetAssignmentsInput{CourseID: id})
+	})
+	add(mcp.NewTool("get_upcoming_assignments", mcp.WithDescription("Get upcoming assignments"), mcp.WithNumber("days_ahead")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetUpcomingAssignments(c, a, tools.GetUpcomingAssignmentsInput{DaysAhead: intArg(r, "days_ahead")})
+	})
+	add(mcp.NewTool("list_resources", mcp.WithDescription("List course resources"), mcp.WithNumber("course_id", mcp.Required()), mcp.WithString("mime_type")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleListResources(c, a, tools.ListResourcesInput{CourseID: intArg(r, "course_id"), MimeType: mcp.ParseString(r, "mime_type", "")})
+	})
+	add(mcp.NewTool("get_calendar_events", mcp.WithDescription("Get calendar events"), mcp.WithNumber("days_ahead")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetCalendarEvents(c, a, tools.GetCalendarEventsInput{DaysAhead: intArg(r, "days_ahead")})
+	})
+	add(mcp.NewTool("get_upcoming_deadlines", mcp.WithDescription("Get upcoming deadlines"), mcp.WithNumber("days_ahead")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetUpcomingDeadlines(c, a, tools.GetUpcomingDeadlinesInput{DaysAhead: intArg(r, "days_ahead")})
+	})
+	add(mcp.NewTool("get_notifications", mcp.WithDescription("Get notifications"), mcp.WithNumber("limit"), mcp.WithBoolean("unread_only")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetNotifications(c, a, tools.GetNotificationsInput{Limit: intArg(r, "limit"), UnreadOnly: mcp.ParseBoolean(r, "unread_only", false)})
+	})
+	return s
 }
-
-func registerTools(s *mcpserver.MCPServer, client *api.Client) {
-
-	// ── Login ──────────────────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("login",
-			mcp.WithDescription("Log in to your Moodle account. This is the first step — provide your Moodle site URL, username, and password."),
-			mcp.WithString("moodle_url", mcp.Required(), mcp.Description("Your Moodle site URL (e.g. https://online.uom.lk)")),
-			mcp.WithString("username", mcp.Required(), mcp.Description("Your Moodle username or email")),
-			mcp.WithString("password", mcp.Required(), mcp.Description("Your Moodle password")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			url := mcp.ParseString(req, "moodle_url", "")
-			user := mcp.ParseString(req, "username", "")
-			pass := mcp.ParseString(req, "password", "")
-			result, err := tools.HandleLogin(ctx, client, tools.LoginInput{
-				MoodleURL: url, Username: user, Password: pass,
-			})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Site Info ──────────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_site_info",
-			mcp.WithDescription("Get information about the connected Moodle site and the logged-in user."),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := tools.HandleGetSiteInfo(ctx, client, tools.GetSiteInfoInput{})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get User Profile ──────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_user_profile",
-			mcp.WithDescription("Get the detailed profile of the currently logged-in user."),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := tools.HandleGetUserProfile(ctx, client, tools.GetUserProfileInput{})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── List Courses ──────────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("list_courses",
-			mcp.WithDescription("List all courses the student is enrolled in."),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := tools.HandleListCourses(ctx, client, tools.ListCoursesInput{})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Course Contents ───────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_course_contents",
-			mcp.WithDescription("Get sections, resources, and activities of a specific course."),
-			mcp.WithNumber("course_id", mcp.Required(), mcp.Description("The Moodle course ID (get it from list_courses)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			id := intArg(req, "course_id")
-			result, err := tools.HandleGetCourseContents(ctx, client, tools.GetCourseContentsInput{CourseID: id})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Course Details ────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_course_details",
-			mcp.WithDescription("Get detailed metadata about a specific course (description, dates, format)."),
-			mcp.WithNumber("course_id", mcp.Required(), mcp.Description("The Moodle course ID")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			id := intArg(req, "course_id")
-			result, err := tools.HandleGetCourseDetails(ctx, client, tools.GetCourseDetailsInput{CourseID: id})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Grades ────────────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_grades",
-			mcp.WithDescription("Get all grade items and scores for a specific course."),
-			mcp.WithNumber("course_id", mcp.Required(), mcp.Description("The Moodle course ID to get grades for")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			id := intArg(req, "course_id")
-			result, err := tools.HandleGetGrades(ctx, client, tools.GetGradesInput{CourseID: id})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Grades Overview ───────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_grades_overview",
-			mcp.WithDescription("Get a summary of grades across all enrolled courses."),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			result, err := tools.HandleGetGradesOverview(ctx, client, tools.GetGradesOverviewInput{})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Assignments ───────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_assignments",
-			mcp.WithDescription("Get all assignments for a specific course with due dates and status."),
-			mcp.WithNumber("course_id", mcp.Required(), mcp.Description("The Moodle course ID")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			id := intArg(req, "course_id")
-			result, err := tools.HandleGetAssignments(ctx, client, tools.GetAssignmentsInput{CourseID: id})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Upcoming Assignments ──────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_upcoming_assignments",
-			mcp.WithDescription("Get all upcoming assignments across all enrolled courses, sorted by due date."),
-			mcp.WithNumber("days_ahead", mcp.Description("Number of days to look ahead (default: 30)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			days := intArg(req, "days_ahead")
-			result, err := tools.HandleGetUpcomingAssignments(ctx, client, tools.GetUpcomingAssignmentsInput{DaysAhead: days})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Submit Assignment ─────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("submit_assignment",
-			mcp.WithDescription("Submit text content for an online text assignment."),
-			mcp.WithNumber("assignment_id", mcp.Required(), mcp.Description("The assignment ID to submit to")),
-			mcp.WithString("text", mcp.Required(), mcp.Description("The text content to submit")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			id := intArg(req, "assignment_id")
-			text := mcp.ParseString(req, "text", "")
-			result, err := tools.HandleSubmitAssignment(ctx, client, tools.SubmitAssignmentInput{
-				AssignmentID: id, Text: text,
-			})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Update Assignment ─────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("update_assignment",
-			mcp.WithDescription("Update (overwrite) an existing online text assignment submission."),
-			mcp.WithNumber("assignment_id", mcp.Required(), mcp.Description("The assignment ID to update")),
-			mcp.WithString("text", mcp.Required(), mcp.Description("The new text content to replace the existing submission")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			id := intArg(req, "assignment_id")
-			text := mcp.ParseString(req, "text", "")
-			result, err := tools.HandleUpdateAssignment(ctx, client, tools.UpdateAssignmentInput{
-				AssignmentID: id, Text: text,
-			})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── List Resources ────────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("list_resources",
-			mcp.WithDescription("List all downloadable files (PDFs, slides, videos) in a course with their module IDs and sizes."),
-			mcp.WithNumber("course_id", mcp.Required(), mcp.Description("The Moodle course ID")),
-			mcp.WithString("mime_type", mcp.Description("Filter by MIME type e.g. application/pdf (optional)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			id := intArg(req, "course_id")
-			mimeType := mcp.ParseString(req, "mime_type", "")
-			result, err := tools.HandleListResources(ctx, client, tools.ListResourcesInput{
-				CourseID: id, MimeType: mimeType,
-			})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Download Resource ─────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("download_resource",
-			mcp.WithDescription("Download a file (PDF, slides, etc.) from Moodle and save it locally. Use list_resources to find module IDs."),
-			mcp.WithNumber("course_id", mcp.Required(), mcp.Description("The Moodle course ID")),
-			mcp.WithNumber("module_id", mcp.Required(), mcp.Description("The module ID of the resource (from list_resources)")),
-			mcp.WithString("save_dir", mcp.Description("Directory to save the file (default: ~/Downloads)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			courseID := intArg(req, "course_id")
-			moduleID := intArg(req, "module_id")
-			saveDir := mcp.ParseString(req, "save_dir", "")
-			result, err := tools.HandleDownloadResource(ctx, client, tools.DownloadResourceInput{
-				CourseID: courseID, ModuleID: moduleID, SaveDir: saveDir,
-			})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Journal Entry ─────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_journal_entry",
-			mcp.WithDescription("Get the current text of a journal entry (modname=journal activities). Use course contents to find the journal ID."),
-			mcp.WithNumber("journal_id", mcp.Required(), mcp.Description("The journal module ID from course contents (modname=journal)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			id := intArg(req, "journal_id")
-			result, err := tools.HandleGetJournalEntry(ctx, client, tools.GetJournalEntryInput{JournalID: id})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Submit Journal Entry ──────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("submit_journal",
-			mcp.WithDescription("Submit or update a journal entry (modname=journal activities such as Technical Article Review, Research Paper Review). Use course contents to find the journal ID."),
-			mcp.WithNumber("journal_id", mcp.Required(), mcp.Description("The journal module ID from course contents (modname=journal)")),
-			mcp.WithString("text", mcp.Required(), mcp.Description("The text content to submit (HTML supported)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			id := intArg(req, "journal_id")
-			text := mcp.ParseString(req, "text", "")
-			result, err := tools.HandleSubmitJournal(ctx, client, tools.SubmitJournalInput{
-				JournalID: id, Text: text,
-			})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Calendar Events ───────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_calendar_events",
-			mcp.WithDescription("Get upcoming calendar events from all enrolled courses."),
-			mcp.WithNumber("days_ahead", mcp.Description("Number of days to look ahead (default: 30)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			days := intArg(req, "days_ahead")
-			result, err := tools.HandleGetCalendarEvents(ctx, client, tools.GetCalendarEventsInput{DaysAhead: days})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Upcoming Deadlines ────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_upcoming_deadlines",
-			mcp.WithDescription("Get a consolidated view of all upcoming deadlines (assignments, quizzes, etc.), sorted by urgency."),
-			mcp.WithNumber("days_ahead", mcp.Description("Number of days to look ahead (default: 14)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			days := intArg(req, "days_ahead")
-			result, err := tools.HandleGetUpcomingDeadlines(ctx, client, tools.GetUpcomingDeadlinesInput{DaysAhead: days})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-
-	// ── Get Notifications ─────────────────────────────────────────
-	s.AddTool(
-		mcp.NewTool("get_notifications",
-			mcp.WithDescription("Get recent messages and notifications from Moodle."),
-			mcp.WithNumber("limit", mcp.Description("Maximum number of notifications (default: 20)")),
-			mcp.WithBoolean("unread_only", mcp.Description("Only show unread notifications (default: true)")),
-		),
-		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-			limit := intArg(req, "limit")
-			unreadOnly := true
-			if v, ok := req.Params.Arguments["unread_only"]; ok {
-				if b, ok := v.(bool); ok {
-					unreadOnly = b
-				}
-			}
-			result, err := tools.HandleGetNotifications(ctx, client, tools.GetNotificationsInput{
-				Limit: limit, UnreadOnly: unreadOnly,
-			})
-			if err != nil {
-				return mcp.NewToolResultError(err.Error()), nil
-			}
-			return mcp.NewToolResultText(result), nil
-		},
-	)
-}
-
-// intArg extracts an integer from request arguments (JSON numbers are float64).
 func intArg(req mcp.CallToolRequest, key string) int {
-	if v, ok := req.Params.Arguments[key]; ok {
-		switch n := v.(type) {
-		case float64:
-			return int(n)
-		case int:
-			return n
-		case json.Number:
-			if i, err := n.Int64(); err == nil {
-				return int(i)
-			}
-		}
-	}
-	return 0
+	return mcp.ParseInt(req, key, 0)
 }
