@@ -155,7 +155,7 @@ func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
 	}
 	q.Set("iss", a.cfg.PublicBaseURL)
 	target.RawQuery = q.Encode()
-	http.Redirect(w, r, target.String(), http.StatusFound)
+	http.Redirect(w, r, target.String(), http.StatusSeeOther)
 }
 func (a *app) token(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
@@ -207,7 +207,7 @@ func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'none'; form-action 'self'; style-src 'unsafe-inline'")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; form-action 'self' https://chatgpt.com; style-src 'unsafe-inline'")
 		next.ServeHTTP(w, r)
 	})
 }
