@@ -82,7 +82,7 @@ func HandleGetAssignments(ctx context.Context, client *api.Client, input GetAssi
 				Intro:    truncate(a.Intro, 200),
 			}
 			if a.DueDate > 0 {
-				due := time.Unix(a.DueDate, 0)
+				due := localTime(a.DueDate)
 				d.DueDate = due.Format("2006-01-02 15:04")
 				d.Overdue = now.After(due)
 				if !d.Overdue {
@@ -90,7 +90,7 @@ func HandleGetAssignments(ctx context.Context, client *api.Client, input GetAssi
 				}
 			}
 			if a.CutoffDate > 0 {
-				d.CutoffDate = time.Unix(a.CutoffDate, 0).Format("2006-01-02 15:04")
+				d.CutoffDate = localTime(a.CutoffDate).Format("2006-01-02 15:04")
 			}
 			display = append(display, d)
 		}
@@ -155,7 +155,7 @@ func HandleGetUpcomingAssignments(ctx context.Context, client *api.Client, input
 				if a.DueDate == 0 {
 					continue
 				}
-				due := time.Unix(a.DueDate, 0)
+				due := localTime(a.DueDate)
 				if due.After(now) && due.Before(cutoff) {
 					upcoming = append(upcoming, UpcomingAssignment{
 						CourseID:   cid,

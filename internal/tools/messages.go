@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/PejarRu/mcp-aules/internal/api"
 )
@@ -87,7 +86,7 @@ func HandleGetNotifications(ctx context.Context, client *api.Client, input GetNo
 			From:    m.UserFromFullName,
 			Subject: m.Subject,
 			Preview: preview,
-			Date:    time.Unix(m.TimeCreated, 0).Format("2006-01-02 15:04"),
+			Date:    localTime(m.TimeCreated).Format("2006-01-02 15:04"),
 			Read:    m.TimeRead > 0,
 		})
 	}

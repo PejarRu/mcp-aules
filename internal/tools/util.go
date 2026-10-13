@@ -6,6 +6,8 @@ import (
 	"html"
 	"regexp"
 	"strings"
+	"time"
+	_ "time/tzdata"
 )
 
 // unmarshal decodes JSON data into v, returning a descriptive error on failure.
@@ -36,6 +38,18 @@ func truncate(s string, max int) string {
 }
 
 // marshalResult encodes v as indented JSON and returns it as a string.
+var aulesLocation = func() *time.Location {
+	location, err := time.LoadLocation("Europe/Madrid")
+	if err != nil {
+		panic(err)
+	}
+	return location
+}()
+
+func localTime(timestamp int64) time.Time {
+	return time.Unix(timestamp, 0).In(aulesLocation)
+}
+
 func marshalResult(v any) (string, error) {
 	b, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {

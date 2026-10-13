@@ -79,7 +79,7 @@ func HandleGetCalendarEvents(ctx context.Context, client *api.Client, input GetC
 
 	var display []CalendarEventDisplay
 	for _, e := range resp.Events {
-		t := time.Unix(e.TimeStart, 0)
+		t := localTime(e.TimeStart)
 		display = append(display, CalendarEventDisplay{
 			ID:     e.ID,
 			Name:   e.Name,
@@ -175,7 +175,7 @@ func HandleGetUpcomingDeadlines(ctx context.Context, client *api.Client, input G
 				if a.DueDate == 0 {
 					continue
 				}
-				due := time.Unix(a.DueDate, 0)
+				due := localTime(a.DueDate)
 				if due.After(now) && due.Before(cutoff) {
 					daysLeft := int(time.Until(due).Hours() / 24)
 					deadlines = append(deadlines, Deadline{
@@ -205,7 +205,7 @@ func HandleGetUpcomingDeadlines(ctx context.Context, client *api.Client, input G
 		if json.Unmarshal(calData, &calResp) == nil {
 			for _, e := range calResp.Events {
 				if e.EventType == "due" || e.EventType == "close" {
-					due := time.Unix(e.TimeStart, 0)
+					due := localTime(e.TimeStart)
 					daysLeft := int(time.Until(due).Hours() / 24)
 					deadlines = append(deadlines, Deadline{
 						Name:       e.Name,

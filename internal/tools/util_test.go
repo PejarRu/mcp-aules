@@ -2,6 +2,7 @@ package tools
 
 import (
 	"testing"
+	"time"
 )
 
 // --- truncate ---
@@ -70,6 +71,25 @@ func TestMarshalResult(t *testing.T) {
 	}
 	if result == "" {
 		t.Fatal("expected non-empty result")
+	}
+}
+
+func TestLocalTimeUsesMadridDaylightSaving(t *testing.T) {
+	tests := []struct {
+		name string
+		utc  time.Time
+		want string
+	}{
+		{"winter", time.Date(2026, time.January, 15, 21, 59, 0, 0, time.UTC), "2026-01-15 22:59 CET"},
+		{"summer", time.Date(2026, time.July, 15, 21, 59, 0, 0, time.UTC), "2026-07-15 23:59 CEST"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := localTime(tt.utc.Unix()).Format("2006-01-02 15:04 MST")
+			if got != tt.want {
+				t.Fatalf("localTime() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -67,10 +67,10 @@ func HandleListCourses(ctx context.Context, client *api.Client, _ ListCoursesInp
 			Active:    c.StartDate <= now && (c.EndDate == 0 || c.EndDate >= now),
 		}
 		if c.StartDate > 0 {
-			d.StartDate = time.Unix(c.StartDate, 0).Format("2006-01-02")
+			d.StartDate = localTime(c.StartDate).Format("2006-01-02")
 		}
 		if c.EndDate > 0 {
-			d.EndDate = time.Unix(c.EndDate, 0).Format("2006-01-02")
+			d.EndDate = localTime(c.EndDate).Format("2006-01-02")
 		}
 		display = append(display, d)
 	}
