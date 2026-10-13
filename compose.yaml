@@ -1,3 +1,5 @@
+name: mcp-aules
+
 services:
   moodle-mcp:
     build: .
