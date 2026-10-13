@@ -41,6 +41,10 @@ func main() {
 	a := &app{cfg: cfg, store: store}
 	a.mcp = mcpserver.NewStreamableHTTPServer(newMCPServer(), mcpserver.WithStateLess(true))
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprint(w, `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Aules MCP</title><body><main><h1>Aules MCP</h1><p>Servidor MCP activo.</p><p>Conecta este servidor desde un cliente MCP compatible usando <code>https://anton.aules.mcp.development.antonberzins.com/mcp</code>. El inicio de sesión se abrirá durante la autorización OAuth.</p></main></body></html>`)
+	})
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", a.authorizationMetadata)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", a.resourceMetadata)
