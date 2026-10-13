@@ -24,9 +24,9 @@ type app struct {
 	store *oauth.Store
 	mcp   http.Handler
 }
-type authPage struct{ ClientID, RedirectURI, State, Challenge, ChallengeMethod, Error string }
+type authPage struct{ ClientID, RedirectURI, State, Challenge, ChallengeMethod, Resource, Scope, Error string }
 
-var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conectar Aules</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f7fb;color:#172033;font:16px system-ui,sans-serif}main{width:min(92vw,430px);padding:2rem;background:#fff;border:1px solid #dce3ed;border-radius:16px;box-shadow:0 12px 36px #17203318}h1{margin:0 0 .5rem;color:#1769aa}p{line-height:1.5}.hint{color:#5d6879;font-size:.92rem}.error{padding:.8rem 1rem;color:#8a1c1c;background:#fff0f0;border:1px solid #e8aaaa;border-radius:8px}label{display:block;margin:1rem 0 .4rem;font-weight:650}input{width:100%;padding:.8rem;border:1px solid #aeb8c6;border-radius:8px;font:inherit}input:focus{outline:3px solid #1769aa33;border-color:#1769aa}button{width:100%;margin-top:1.4rem;padding:.85rem;border:0;border-radius:8px;background:#1769aa;color:#fff;font:700 1rem system-ui;cursor:pointer}button:hover{background:#0f548b}.privacy{margin-top:1.25rem;font-size:.8rem;color:#6c7685}</style></head><body><main><h1>Conectar Aules</h1><p>Inicia sesión con tus credenciales habituales de Aules.</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}<form method="post" action="/authorize"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="state" value="{{.State}}"><input type="hidden" name="code_challenge" value="{{.Challenge}}"><input type="hidden" name="code_challenge_method" value="{{.ChallengeMethod}}"><label for="username">Usuario de Aules</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false"><p class="hint">Usa tu nombre de usuario, no el correo electrónico.</p><label for="password">Contraseña</label><input id="password" type="password" name="password" autocomplete="current-password"><button type="submit" formnovalidate>Conectar con Aules</button></form><p class="privacy">Las credenciales se envían directamente a Aules. La contraseña no se almacena.</p></main></body></html>`))
+var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conectar Aules</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f7fb;color:#172033;font:16px system-ui,sans-serif}main{width:min(92vw,430px);padding:2rem;background:#fff;border:1px solid #dce3ed;border-radius:16px;box-shadow:0 12px 36px #17203318}h1{margin:0 0 .5rem;color:#1769aa}p{line-height:1.5}.hint{color:#5d6879;font-size:.92rem}.error{padding:.8rem 1rem;color:#8a1c1c;background:#fff0f0;border:1px solid #e8aaaa;border-radius:8px}label{display:block;margin:1rem 0 .4rem;font-weight:650}input{width:100%;padding:.8rem;border:1px solid #aeb8c6;border-radius:8px;font:inherit}input:focus{outline:3px solid #1769aa33;border-color:#1769aa}button{width:100%;margin-top:1.4rem;padding:.85rem;border:0;border-radius:8px;background:#1769aa;color:#fff;font:700 1rem system-ui;cursor:pointer}button:hover{background:#0f548b}.privacy{margin-top:1.25rem;font-size:.8rem;color:#6c7685}</style></head><body><main><h1>Conectar Aules</h1><p>Inicia sesión con tus credenciales habituales de Aules.</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}<form method="post" action="/authorize"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="state" value="{{.State}}"><input type="hidden" name="code_challenge" value="{{.Challenge}}"><input type="hidden" name="code_challenge_method" value="{{.ChallengeMethod}}"><input type="hidden" name="resource" value="{{.Resource}}"><input type="hidden" name="scope" value="{{.Scope}}"><label for="username">Usuario de Aules</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false"><p class="hint">Usa tu nombre de usuario, no el correo electrónico.</p><label for="password">Contraseña</label><input id="password" type="password" name="password" autocomplete="current-password"><button type="submit" formnovalidate>Conectar con Aules</button></form><p class="privacy">Las credenciales se envían directamente a Aules. La contraseña no se almacena.</p></main></body></html>`))
 
 func main() {
 	cfg := config.LoadFromEnv()
@@ -65,7 +65,7 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	json.NewEncoder(w).Encode(value)
 }
 func (a *app) authorizationMetadata(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, 200, map[string]any{"issuer": a.cfg.PublicBaseURL, "authorization_endpoint": a.cfg.PublicBaseURL + "/authorize", "token_endpoint": a.cfg.PublicBaseURL + "/token", "registration_endpoint": a.cfg.PublicBaseURL + "/register", "revocation_endpoint": a.cfg.PublicBaseURL + "/revoke", "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code"}, "code_challenge_methods_supported": []string{"S256"}, "token_endpoint_auth_methods_supported": []string{"none"}})
+	writeJSON(w, 200, map[string]any{"issuer": a.cfg.PublicBaseURL, "authorization_endpoint": a.cfg.PublicBaseURL + "/authorize", "token_endpoint": a.cfg.PublicBaseURL + "/token", "registration_endpoint": a.cfg.PublicBaseURL + "/register", "revocation_endpoint": a.cfg.PublicBaseURL + "/revoke", "response_types_supported": []string{"code"}, "grant_types_supported": []string{"authorization_code"}, "code_challenge_methods_supported": []string{"S256"}, "token_endpoint_auth_methods_supported": []string{"none"}, "scopes_supported": []string{"mcp"}, "authorization_response_iss_parameter_supported": true})
 }
 func (a *app) resourceMetadata(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, 200, map[string]any{"resource": a.cfg.PublicBaseURL + "/mcp", "authorization_servers": []string{a.cfg.PublicBaseURL}, "bearer_methods_supported": []string{"header"}})
@@ -86,7 +86,7 @@ func (a *app) register(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, map[string]any{"client_id": c.ID, "redirect_uris": c.RedirectURIs, "token_endpoint_auth_method": "none"})
 }
 func authInput(r *http.Request) authPage {
-	return authPage{ClientID: r.FormValue("client_id"), RedirectURI: r.FormValue("redirect_uri"), State: r.FormValue("state"), Challenge: r.FormValue("code_challenge"), ChallengeMethod: r.FormValue("code_challenge_method")}
+	return authPage{ClientID: r.FormValue("client_id"), RedirectURI: r.FormValue("redirect_uri"), State: r.FormValue("state"), Challenge: r.FormValue("code_challenge"), ChallengeMethod: r.FormValue("code_challenge_method"), Resource: r.FormValue("resource"), Scope: r.FormValue("scope")}
 }
 func (a *app) validateAuth(p authPage, responseType string) error {
 	if responseType != "code" {
@@ -153,21 +153,27 @@ func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
 	if p.State != "" {
 		q.Set("state", p.State)
 	}
+	q.Set("iss", a.cfg.PublicBaseURL)
 	target.RawQuery = q.Encode()
 	http.Redirect(w, r, target.String(), http.StatusFound)
 }
 func (a *app) token(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if r.ParseForm() != nil || r.FormValue("grant_type") != "authorization_code" {
+		log.Printf("OAuth token request rejected: invalid request")
 		writeJSON(w, 400, map[string]string{"error": "invalid_request"})
 		return
 	}
-	token, expires, err := a.store.Exchange(r.FormValue("code"), r.FormValue("client_id"), r.FormValue("redirect_uri"), r.FormValue("code_verifier"))
+	clientID := r.FormValue("client_id")
+	log.Printf("OAuth token exchange started for client %s", shortID(clientID))
+	token, expires, err := a.store.Exchange(r.FormValue("code"), clientID, r.FormValue("redirect_uri"), r.FormValue("code_verifier"))
 	if err != nil {
+		log.Printf("OAuth token exchange failed for client %s: %v", shortID(clientID), err)
 		writeJSON(w, 400, map[string]string{"error": "invalid_grant"})
 		return
 	}
-	writeJSON(w, 200, map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": expires - time.Now().Unix()})
+	log.Printf("OAuth token exchange succeeded for client %s", shortID(clientID))
+	writeJSON(w, 200, map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": expires - time.Now().Unix(), "scope": "mcp"})
 }
 func (a *app) revoke(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
