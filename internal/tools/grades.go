@@ -60,13 +60,23 @@ func HandleGetGrades(ctx context.Context, client *api.Client, input GetGradesInp
 		return "", err
 	}
 
-	var report GradeReport
+	var report map[string]any
 	if err := json.Unmarshal(data, &report); err != nil {
 		return "", fmt.Errorf("parsing grades: %w", err)
 	}
-
-	result, _ := json.MarshalIndent(report, "", "  ")
-	return string(result), nil
+	for _, userGrade := range mapsValue(report["usergrades"]) {
+		for _, item := range mapsValue(userGrade["gradeitems"]) {
+			feedback := stringValue(item["feedback"])
+			item["feedback_html"] = feedback
+			item["feedback_text"] = stripHTML(feedback)
+			for _, key := range []string{"gradedategraded", "gradedatesubmitted"} {
+				item[key+"_rfc3339"] = rfc3339(int64Value(item[key]))
+			}
+		}
+	}
+	report["course_id"] = input.CourseID
+	report["timezone"] = "Europe/Madrid"
+	return marshalResult(report)
 }
 
 // --- Get Grades Overview Tool ---
@@ -77,6 +87,12 @@ type CourseGradeSummary struct {
 	TotalGrade string `json:"total_grade"`
 	GradeMax   string `json:"grade_max"`
 	ItemCount  int    `json:"graded_items"`
+}
+
+type GradeOverviewWarning struct {
+	CourseID int    `json:"course_id"`
+	Stage    string `json:"stage"`
+	Message  string `json:"message"`
 }
 
 type GetGradesOverviewInput struct{}
@@ -93,6 +109,7 @@ func HandleGetGradesOverview(ctx context.Context, client *api.Client, _ GetGrade
 
 	userID := client.GetUserID()
 	var summaries []CourseGradeSummary
+	var warnings []GradeOverviewWarning
 
 	for _, cid := range courseIDs {
 		params := map[string]string{
@@ -102,11 +119,13 @@ func HandleGetGradesOverview(ctx context.Context, client *api.Client, _ GetGrade
 
 		data, err := client.Call(ctx, "gradereport_user_get_grade_items", params)
 		if err != nil {
-			continue // Skip courses where we can't access grades
+			warnings = append(warnings, GradeOverviewWarning{CourseID: cid, Stage: "grade_items", Message: err.Error()})
+			continue
 		}
 
 		var report GradeReport
 		if err := json.Unmarshal(data, &report); err != nil {
+			warnings = append(warnings, GradeOverviewWarning{CourseID: cid, Stage: "parse_grade_items", Message: err.Error()})
 			continue
 		}
 
@@ -137,9 +156,13 @@ func HandleGetGradesOverview(ctx context.Context, client *api.Client, _ GetGrade
 			var courses []struct {
 				FullName string `json:"fullname"`
 			}
-			if json.Unmarshal(cData, &courses) == nil && len(courses) > 0 {
+			if err := json.Unmarshal(cData, &courses); err != nil {
+				warnings = append(warnings, GradeOverviewWarning{CourseID: cid, Stage: "parse_course", Message: err.Error()})
+			} else if len(courses) > 0 {
 				courseName = courses[0].FullName
 			}
+		} else {
+			warnings = append(warnings, GradeOverviewWarning{CourseID: cid, Stage: "course", Message: err.Error()})
 		}
 
 		summaries = append(summaries, CourseGradeSummary{
@@ -154,6 +177,7 @@ func HandleGetGradesOverview(ctx context.Context, client *api.Client, _ GetGrade
 	result, _ := json.MarshalIndent(map[string]interface{}{
 		"total_courses": len(summaries),
 		"grades":        summaries,
+		"warnings":      warnings,
 	}, "", "  ")
 	return string(result), nil
 }

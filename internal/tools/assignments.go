@@ -12,26 +12,43 @@ import (
 // --- Get Assignments Tool ---
 
 type Assignment struct {
-	ID         int    `json:"id"`
-	CMID       int    `json:"cmid"`
-	Name       string `json:"name"`
-	DueDate    int64  `json:"duedate"`
-	CutoffDate int64  `json:"cutoffdate"`
-	AllowFrom  int64  `json:"allowsubmissionsfromdate"`
-	Grade      int    `json:"grade"`
-	Intro      string `json:"intro"`
-	NoSubmit   int    `json:"nosubmissions"`
+	ID               int              `json:"id"`
+	CMID             int              `json:"cmid"`
+	Name             string           `json:"name"`
+	DueDate          int64            `json:"duedate"`
+	CutoffDate       int64            `json:"cutoffdate"`
+	AllowFrom        int64            `json:"allowsubmissionsfromdate"`
+	GradingDueDate   int64            `json:"gradingduedate"`
+	TimeModified     int64            `json:"timemodified"`
+	Grade            int              `json:"grade"`
+	Intro            string           `json:"intro"`
+	IntroFormat      int              `json:"introformat"`
+	NoSubmit         int              `json:"nosubmissions"`
+	IntroFiles       []map[string]any `json:"introfiles"`
+	IntroAttachments []map[string]any `json:"introattachments"`
 }
 
 type AssignmentDisplay struct {
-	ID         int    `json:"id"`
-	Name       string `json:"name"`
-	DueDate    string `json:"due_date"`
-	CutoffDate string `json:"cutoff_date,omitempty"`
-	MaxGrade   int    `json:"max_grade"`
-	Overdue    bool   `json:"overdue"`
-	DaysLeft   int    `json:"days_left,omitempty"`
-	Intro      string `json:"description,omitempty"`
+	ID                 int            `json:"id"`
+	CMID               int            `json:"cmid"`
+	Name               string         `json:"name"`
+	DueDateUnix        int64          `json:"due_date_unix,omitempty"`
+	DueDate            string         `json:"due_date,omitempty"`
+	CutoffDateUnix     int64          `json:"cutoff_date_unix,omitempty"`
+	CutoffDate         string         `json:"cutoff_date,omitempty"`
+	AllowFromUnix      int64          `json:"allow_submissions_from_unix,omitempty"`
+	AllowFrom          string         `json:"allow_submissions_from,omitempty"`
+	GradingDueDateUnix int64          `json:"grading_due_date_unix,omitempty"`
+	GradingDueDate     string         `json:"grading_due_date,omitempty"`
+	TimeModifiedUnix   int64          `json:"time_modified_unix,omitempty"`
+	TimeModified       string         `json:"time_modified,omitempty"`
+	MaxGrade           int            `json:"max_grade"`
+	Overdue            bool           `json:"overdue"`
+	DaysLeft           int            `json:"days_left,omitempty"`
+	DescriptionHTML    string         `json:"description_html"`
+	DescriptionText    string         `json:"description_text"`
+	DescriptionFormat  int            `json:"description_format"`
+	TeacherAttachments []FileMetadata `json:"teacher_attachments"`
 }
 
 type AssignmentCourse struct {
@@ -75,22 +92,23 @@ func HandleGetAssignments(ctx context.Context, client *api.Client, input GetAssi
 	var display []AssignmentDisplay
 	for _, course := range resp.Courses {
 		for _, a := range course.Assignments {
+			attachments := append(fileMetadata(a.IntroFiles), fileMetadata(a.IntroAttachments)...)
 			d := AssignmentDisplay{
-				ID:       a.ID,
-				Name:     a.Name,
-				MaxGrade: a.Grade,
-				Intro:    truncate(a.Intro, 200),
+				ID: a.ID, CMID: a.CMID, Name: a.Name, MaxGrade: a.Grade,
+				DueDateUnix: a.DueDate, DueDate: rfc3339(a.DueDate),
+				CutoffDateUnix: a.CutoffDate, CutoffDate: rfc3339(a.CutoffDate),
+				AllowFromUnix: a.AllowFrom, AllowFrom: rfc3339(a.AllowFrom),
+				GradingDueDateUnix: a.GradingDueDate, GradingDueDate: rfc3339(a.GradingDueDate),
+				TimeModifiedUnix: a.TimeModified, TimeModified: rfc3339(a.TimeModified),
+				DescriptionHTML: a.Intro, DescriptionText: stripHTML(a.Intro), DescriptionFormat: a.IntroFormat,
+				TeacherAttachments: attachments,
 			}
 			if a.DueDate > 0 {
 				due := localTime(a.DueDate)
-				d.DueDate = due.Format("2006-01-02 15:04")
 				d.Overdue = now.After(due)
 				if !d.Overdue {
 					d.DaysLeft = int(time.Until(due).Hours() / 24)
 				}
-			}
-			if a.CutoffDate > 0 {
-				d.CutoffDate = localTime(a.CutoffDate).Format("2006-01-02 15:04")
 			}
 			display = append(display, d)
 		}
@@ -98,6 +116,7 @@ func HandleGetAssignments(ctx context.Context, client *api.Client, input GetAssi
 
 	result, _ := json.MarshalIndent(map[string]interface{}{
 		"course_id":         input.CourseID,
+		"timezone":          "Europe/Madrid",
 		"total_assignments": len(display),
 		"assignments":       display,
 	}, "", "  ")

@@ -247,6 +247,12 @@ func newMCPServer() *mcpserver.MCPServer {
 	course("get_grades", "Get course grades", func(c context.Context, a *api.Client, id int) (string, error) {
 		return tools.HandleGetGrades(c, a, tools.GetGradesInput{CourseID: id})
 	})
+	course("get_course_gradebook", "Get complete course gradebook", func(c context.Context, a *api.Client, id int) (string, error) {
+		return tools.HandleGetCourseGradebook(c, a, tools.GetCourseGradebookInput{CourseID: id})
+	})
+	course("get_course_learning_content", "Get ordered course learning content", func(c context.Context, a *api.Client, id int) (string, error) {
+		return tools.HandleGetCourseLearningContent(c, a, tools.GetCourseLearningContentInput{CourseID: id})
+	})
 	add(mcp.NewTool("get_grades_overview", mcp.WithDescription("Get grades overview")), func(c context.Context, _ mcp.CallToolRequest, a *api.Client) (string, error) {
 		return tools.HandleGetGradesOverview(c, a, tools.GetGradesOverviewInput{})
 	})
@@ -255,6 +261,21 @@ func newMCPServer() *mcpserver.MCPServer {
 	})
 	add(mcp.NewTool("get_upcoming_assignments", mcp.WithDescription("Get upcoming assignments"), mcp.WithNumber("days_ahead")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
 		return tools.HandleGetUpcomingAssignments(c, a, tools.GetUpcomingAssignmentsInput{DaysAhead: intArg(r, "days_ahead")})
+	})
+	add(mcp.NewTool("get_assignment_details", mcp.WithDescription("Get complete assignment details and teacher attachments"), mcp.WithNumber("assignment_id", mcp.Required())), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetAssignmentDetails(c, a, tools.GetAssignmentDetailsInput{AssignmentID: intArg(r, "assignment_id")})
+	})
+	add(mcp.NewTool("get_assignment_status", mcp.WithDescription("Get assignment submission and grading status"), mcp.WithNumber("assignment_id", mcp.Required())), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetAssignmentStatus(c, a, tools.GetAssignmentStatusInput{AssignmentID: intArg(r, "assignment_id")})
+	})
+	course("list_quizzes", "List course quizzes", func(c context.Context, a *api.Client, id int) (string, error) {
+		return tools.HandleListQuizzes(c, a, tools.ListQuizzesInput{CourseID: id})
+	})
+	add(mcp.NewTool("get_quiz_status", mcp.WithDescription("Get quiz configuration, attempts, and best grade"), mcp.WithNumber("quiz_id", mcp.Required())), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetQuizStatus(c, a, tools.GetQuizStatusInput{QuizID: intArg(r, "quiz_id")})
+	})
+	add(mcp.NewTool("list_course_announcements", mcp.WithDescription("List full course announcements"), mcp.WithNumber("course_id", mcp.Required()), mcp.WithNumber("limit")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleListCourseAnnouncements(c, a, tools.ListCourseAnnouncementsInput{CourseID: intArg(r, "course_id"), Limit: intArg(r, "limit")})
 	})
 	add(mcp.NewTool("list_resources", mcp.WithDescription("List course resources"), mcp.WithNumber("course_id", mcp.Required()), mcp.WithString("mime_type")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
 		return tools.HandleListResources(c, a, tools.ListResourcesInput{CourseID: intArg(r, "course_id"), MimeType: mcp.ParseString(r, "mime_type", "")})

@@ -65,6 +65,87 @@ func TestHandleGetAssignments_MissingCourseID(t *testing.T) {
 	}
 }
 
+func TestHandleGetAssignments_PreservesContentAndTeacherFiles(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assignment := map[string]any{
+			"id": 12, "cmid": 34, "name": "Trabajo", "intro": "<p>Descripción <b>completa</b></p>", "introformat": 1,
+			"duedate": 1700000000, "introfiles": []any{map[string]any{"filename": "guia.pdf", "filepath": "/", "mimetype": "application/pdf", "filesize": 42, "timemodified": 1700000100, "fileurl": "https://example.test/guia.pdf?token=secret&x=1"}},
+		}
+		json.NewEncoder(w).Encode(map[string]any{"courses": []any{map[string]any{"id": 7, "assignments": []any{assignment}}}})
+	})
+	c, srv := newTestClient(t, handler)
+	defer srv.Close()
+	result, err := HandleGetAssignments(context.Background(), c, GetAssignmentsInput{CourseID: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatal(err)
+	}
+	assignment := out["assignments"].([]any)[0].(map[string]any)
+	if assignment["description_html"] != "<p>Descripción <b>completa</b></p>" || assignment["description_text"] != "Descripción completa" {
+		t.Fatalf("unexpected descriptions: %#v", assignment)
+	}
+	file := assignment["teacher_attachments"].([]any)[0].(map[string]any)
+	if file["fileurl"] != "https://example.test/guia.pdf?x=1" {
+		t.Fatalf("token not removed: %v", file["fileurl"])
+	}
+	if out["timezone"] != "Europe/Madrid" {
+		t.Fatalf("timezone = %v", out["timezone"])
+	}
+}
+
+func TestDeriveAssignmentState(t *testing.T) {
+	tests := []struct {
+		status   string
+		modified int64
+		due      int64
+		want     string
+	}{
+		{"draft", 20, 10, "draft"},
+		{"submitted", 10, 20, "submitted"},
+		{"submitted", 30, 20, "submitted_late"},
+		{"reopened", 30, 20, "reopened"},
+		{"new", 0, 20, "not_submitted"},
+	}
+	for _, test := range tests {
+		got, _ := deriveAssignmentState(map[string]any{"status": test.status, "timemodified": float64(test.modified)}, map[string]any{}, test.due)
+		if got != test.want {
+			t.Errorf("status %q = %q, want %q", test.status, got, test.want)
+		}
+	}
+}
+
+func TestHandleGetAssignmentStatus_SubmittedLate(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("wsfunction") {
+		case "core_enrol_get_users_courses":
+			json.NewEncoder(w).Encode([]map[string]any{{"id": 7}})
+		case "mod_assign_get_assignments":
+			json.NewEncoder(w).Encode(map[string]any{"courses": []any{map[string]any{"id": 7, "assignments": []any{map[string]any{"id": 12, "duedate": 100, "attemptreopenmethod": "manual", "maxattempts": 3}}}}})
+		case "mod_assign_get_submission_status":
+			json.NewEncoder(w).Encode(map[string]any{"lastattempt": map[string]any{"graded": false, "gradingstatus": "notgraded", "locked": true, "canedit": false, "cansubmit": false, "submissionsenabled": true, "submission": map[string]any{"status": "submitted", "attemptnumber": 2, "timemodified": 120, "plugins": []any{}}}})
+		default:
+			t.Fatalf("unexpected function %q", r.URL.Query().Get("wsfunction"))
+		}
+	})
+	client, server := newTestClient(t, handler)
+	defer server.Close()
+	result, err := HandleGetAssignmentStatus(context.Background(), client, GetAssignmentStatusInput{AssignmentID: 12})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out["submission_status"] != "submitted_late" || out["grading_status"] != "pending" || out["is_late"] != true || out["is_overdue"] != false || out["locked"] != true || out["attempt_number"] != float64(2) {
+		t.Fatalf("unexpected status: %#v", out)
+	}
+}
+
 func TestHandleGetGrades_MissingCourseID(t *testing.T) {
 	c, srv := newTestClient(t, http.NotFoundHandler())
 	defer srv.Close()

@@ -15,6 +15,8 @@ Servidor remoto Model Context Protocol para consultar Aules mediante OAuth 2.1. 
 
 Solo se publican tools de lectura: perfil, cursos, contenidos, notas, tareas, recursos, calendario, plazos y notificaciones. No se publican login MCP, descargas ni operaciones mutadoras.
 
+Tools enriquecidas: `get_assignments`, `get_assignment_details`, `get_assignment_status`, `list_quizzes`, `get_quiz_status`, `get_grades`, `get_course_gradebook`, `list_course_announcements`, `get_course_learning_content`; `get_notifications` devuelve cuerpo completo y contexto.
+
 ## Configuración
 
 | Variable | Uso |

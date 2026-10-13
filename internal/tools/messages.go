@@ -11,23 +11,39 @@ import (
 // --- Get Notifications Tool ---
 
 type Message struct {
-	ID               int    `json:"id"`
-	UserIDFrom       int    `json:"useridfrom"`
-	UserFromFullName string `json:"userfromfullname"`
-	Subject          string `json:"subject"`
-	Text             string `json:"text"`
-	FullMessage      string `json:"fullmessage"`
-	TimeCreated      int64  `json:"timecreated"`
-	TimeRead         int64  `json:"timeread"`
+	ID                int    `json:"id"`
+	UserIDFrom        int    `json:"useridfrom"`
+	UserFromFullName  string `json:"userfromfullname"`
+	Subject           string `json:"subject"`
+	Text              string `json:"text"`
+	FullMessage       string `json:"fullmessage"`
+	FullMessageHTML   string `json:"fullmessagehtml"`
+	FullMessageFormat int    `json:"fullmessageformat"`
+	SmallMessage      string `json:"smallmessage"`
+	Component         string `json:"component"`
+	EventType         string `json:"eventtype"`
+	ContextURL        string `json:"contexturl"`
+	ContextURLName    string `json:"contexturlname"`
+	TimeCreated       int64  `json:"timecreated"`
+	TimeRead          int64  `json:"timeread"`
 }
 
 type MessageDisplay struct {
-	ID      int    `json:"id"`
-	From    string `json:"from"`
-	Subject string `json:"subject"`
-	Preview string `json:"preview"`
-	Date    string `json:"date"`
-	Read    bool   `json:"read"`
+	ID                int    `json:"id"`
+	From              string `json:"from"`
+	Subject           string `json:"subject"`
+	Preview           string `json:"preview"`
+	FullMessage       string `json:"fullmessage"`
+	FullMessageHTML   string `json:"fullmessagehtml"`
+	FullMessageFormat int    `json:"fullmessageformat"`
+	BodyText          string `json:"body_text"`
+	Component         string `json:"component,omitempty"`
+	EventType         string `json:"event_type,omitempty"`
+	Context           string `json:"context,omitempty"`
+	Link              string `json:"link,omitempty"`
+	Timestamp         int64  `json:"timestamp"`
+	Date              string `json:"date"`
+	Read              bool   `json:"read"`
 }
 
 type MessagesResponse struct {
@@ -47,6 +63,9 @@ func HandleGetNotifications(ctx context.Context, client *api.Client, input GetNo
 	limit := input.Limit
 	if limit <= 0 {
 		limit = 20
+	}
+	if limit > 100 {
+		limit = 100
 	}
 
 	userID, err := ensureUserID(ctx, client)
@@ -75,23 +94,26 @@ func HandleGetNotifications(ctx context.Context, client *api.Client, input GetNo
 
 	var display []MessageDisplay
 	for _, m := range resp.Messages {
-		preview := m.Text
-		if preview == "" {
-			preview = m.FullMessage
+		bodyText := m.FullMessage
+		if bodyText == "" {
+			bodyText = m.Text
 		}
-		preview = truncate(stripHTML(preview), 150)
-
+		bodyHTML := m.FullMessageHTML
+		if bodyHTML == "" {
+			bodyHTML = m.FullMessage
+		}
 		display = append(display, MessageDisplay{
-			ID:      m.ID,
-			From:    m.UserFromFullName,
-			Subject: m.Subject,
-			Preview: preview,
-			Date:    localTime(m.TimeCreated).Format("2006-01-02 15:04"),
-			Read:    m.TimeRead > 0,
+			ID: m.ID, From: m.UserFromFullName, Subject: m.Subject,
+			Preview:     truncate(stripHTML(firstNonEmpty(m.SmallMessage, bodyText)), 150),
+			FullMessage: m.FullMessage, FullMessageHTML: bodyHTML, FullMessageFormat: m.FullMessageFormat,
+			BodyText: stripHTML(bodyText), Component: m.Component, EventType: m.EventType, Context: m.ContextURLName,
+			Link: removeToken(m.ContextURL), Timestamp: m.TimeCreated,
+			Date: rfc3339(m.TimeCreated), Read: m.TimeRead > 0,
 		})
 	}
 
 	result, _ := json.MarshalIndent(map[string]interface{}{
+		"timezone":       "Europe/Madrid",
 		"total_messages": len(display),
 		"messages":       display,
 	}, "", "  ")
