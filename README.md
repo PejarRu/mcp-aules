@@ -2,9 +2,16 @@
 
 Servidor remoto Model Context Protocol para consultar Aules mediante OAuth 2.1. Cada usuario inicia sesión en Aules desde el navegador; su token Aules se cifra en SQLite y recibe un bearer MCP independiente.
 
+Para retomar el proyecto, leer primero [PROJECT_CONTEXT.md](PROJECT_CONTEXT.md):
+arquitectura, producción, decisiones, incidentes, descartes y trabajo pendiente.
+Las prácticas reutilizables de seguridad y OAuth están en
+[MCP_REMOTE_AUTH_LESSONS.md](MCP_REMOTE_AUTH_LESSONS.md).
+
 ## Endpoints
 
 - `POST /mcp`: Streamable HTTP stateless, protegido por bearer.
+- `GET /`: página informativa; **no** es un endpoint MCP. Configurar siempre la
+  URL terminada en `/mcp`.
 - `GET /health`: health check (`204`).
 - `GET /.well-known/oauth-authorization-server`: discovery OAuth.
 - `GET /.well-known/oauth-protected-resource`: metadata del recurso MCP.
