@@ -165,7 +165,7 @@ func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "authorization failed", 500)
 		return
 	}
-	log.Printf("OAuth authorization succeeded for client %s after %s; redirecting to client", shortID(p.ClientID), time.Since(started).Round(time.Millisecond))
+	log.Printf("OAuth authorization succeeded for client %s after %s; callback host=%s state=%t resource=%t", shortID(p.ClientID), time.Since(started).Round(time.Millisecond), targetHost(p.RedirectURI), p.State != "", p.Resource != "")
 	target, _ := url.Parse(p.RedirectURI)
 	q := target.Query()
 	q.Set("code", code)
@@ -175,6 +175,14 @@ func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
 	q.Set("iss", a.cfg.PublicBaseURL)
 	target.RawQuery = q.Encode()
 	http.Redirect(w, r, target.String(), http.StatusSeeOther)
+}
+
+func targetHost(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "invalid"
+	}
+	return u.Host
 }
 func (a *app) token(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
