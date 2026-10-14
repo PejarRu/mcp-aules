@@ -198,14 +198,17 @@ func (a *app) bearer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bearer, err := oauth.Bearer(r.Header.Get("Authorization"))
 		if err != nil {
+			log.Printf("MCP request rejected: missing bearer")
 			unauthorized(w, a.cfg.PublicBaseURL)
 			return
 		}
 		session, err := a.store.AulesSession(bearer)
 		if err != nil {
+			log.Printf("MCP request rejected: invalid bearer")
 			unauthorized(w, a.cfg.PublicBaseURL)
 			return
 		}
+		log.Printf("MCP request accepted: method=%s platform=%s", r.Method, session.MoodleURL)
 		client := api.NewClient()
 		client.SetSession(session.MoodleURL, session.Token)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, client)))
