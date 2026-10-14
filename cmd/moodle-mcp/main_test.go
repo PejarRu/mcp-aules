@@ -81,3 +81,19 @@ func TestBearerChallenge(t *testing.T) {
 		t.Fatal("resource metadata challenge missing")
 	}
 }
+
+func TestChatGPTCORSPreflight(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodOptions, "/mcp", nil)
+	req.Header.Set("Origin", "https://chatgpt.com")
+	req.Header.Set("Access-Control-Request-Headers", "authorization, content-type")
+	chatGPTCORS(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("preflight reached protected handler")
+	})).ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	if recorder.Header().Get("Access-Control-Allow-Origin") != "https://chatgpt.com" {
+		t.Fatal("CORS origin missing")
+	}
+}

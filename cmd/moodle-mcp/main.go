@@ -58,7 +58,7 @@ func main() {
 	mux.HandleFunc("POST /authorize", a.authorizePost)
 	mux.HandleFunc("POST /token", a.token)
 	mux.HandleFunc("POST /revoke", a.revoke)
-	mux.Handle("/mcp", a.bearer(http.HandlerFunc(a.mcp.ServeHTTP)))
+	mux.Handle("/mcp", chatGPTCORS(a.bearer(http.HandlerFunc(a.mcp.ServeHTTP))))
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: securityHeaders(mux), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}
 	log.Printf("listening on %s", cfg.ListenAddr)
 	log.Fatal(srv.ListenAndServe())
@@ -217,6 +217,24 @@ func (a *app) bearer(next http.Handler) http.Handler {
 func unauthorized(w http.ResponseWriter, base string) {
 	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource"`, base))
 	writeJSON(w, 401, map[string]string{"error": "invalid_token"})
+}
+
+func chatGPTCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin == "https://chatgpt.com" || origin == "https://chat.openai.com" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", r.Header.Get("Access-Control-Request-Headers"))
+			w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
+			w.Header().Set("Vary", "Origin, Access-Control-Request-Headers")
+			if r.Method == http.MethodOptions {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
