@@ -95,7 +95,11 @@ func (a *app) authInput(r *http.Request) authPage {
 	if moodleURL == "" {
 		moodleURL = a.cfg.MoodleURL
 	}
-	return authPage{ClientID: r.FormValue("client_id"), RedirectURI: r.FormValue("redirect_uri"), State: r.FormValue("state"), Challenge: r.FormValue("code_challenge"), ChallengeMethod: r.FormValue("code_challenge_method"), Resource: r.FormValue("resource"), Scope: r.FormValue("scope"), MoodleURL: moodleURL, Platforms: config.MoodlePlatforms}
+	resource := r.FormValue("resource")
+	if resource == "" {
+		resource = a.cfg.PublicBaseURL + "/mcp"
+	}
+	return authPage{ClientID: r.FormValue("client_id"), RedirectURI: r.FormValue("redirect_uri"), State: r.FormValue("state"), Challenge: r.FormValue("code_challenge"), ChallengeMethod: r.FormValue("code_challenge_method"), Resource: resource, Scope: r.FormValue("scope"), MoodleURL: moodleURL, Platforms: config.MoodlePlatforms}
 }
 func (a *app) validateAuth(p authPage, responseType string) error {
 	if responseType != "code" {
@@ -106,6 +110,9 @@ func (a *app) validateAuth(p authPage, responseType string) error {
 	}
 	if !config.IsSupportedMoodleURL(p.MoodleURL) {
 		return fmt.Errorf("unsupported Aules platform")
+	}
+	if p.Resource != a.cfg.PublicBaseURL+"/mcp" {
+		return fmt.Errorf("invalid resource")
 	}
 	return oauth.ValidatePKCE(p.Challenge, p.ChallengeMethod)
 }
@@ -152,7 +159,7 @@ func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
 		platformLoginTemplate.Execute(w, p)
 		return
 	}
-	code, err := a.store.CreateCode(p.ClientID, p.RedirectURI, p.Challenge, p.MoodleURL, token)
+	code, err := a.store.CreateCode(p.ClientID, p.RedirectURI, p.Challenge, p.MoodleURL, p.Resource, token)
 	if err != nil {
 		log.Printf("OAuth authorization code creation failed for client %s: %v", shortID(p.ClientID), err)
 		http.Error(w, "authorization failed", 500)
@@ -178,14 +185,14 @@ func (a *app) token(w http.ResponseWriter, r *http.Request) {
 	}
 	clientID := r.FormValue("client_id")
 	log.Printf("OAuth token exchange started for client %s", shortID(clientID))
-	token, expires, err := a.store.Exchange(r.FormValue("code"), clientID, r.FormValue("redirect_uri"), r.FormValue("code_verifier"))
+	token, expires, resource, err := a.store.Exchange(r.FormValue("code"), clientID, r.FormValue("redirect_uri"), r.FormValue("code_verifier"), r.FormValue("resource"))
 	if err != nil {
 		log.Printf("OAuth token exchange failed for client %s: %v", shortID(clientID), err)
 		writeJSON(w, 400, map[string]string{"error": "invalid_grant"})
 		return
 	}
 	log.Printf("OAuth token exchange succeeded for client %s", shortID(clientID))
-	writeJSON(w, 200, map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": expires - time.Now().Unix(), "scope": "mcp"})
+	writeJSON(w, 200, map[string]any{"access_token": token, "token_type": "Bearer", "expires_in": expires - time.Now().Unix(), "scope": "mcp", "resource": resource})
 }
 func (a *app) revoke(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)

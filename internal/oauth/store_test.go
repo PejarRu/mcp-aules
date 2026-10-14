@@ -31,22 +31,26 @@ func TestAuthorizationCodeFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifier := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
-	code, err := store.CreateCode(client.ID, redirect, challenge(verifier), "https://aules.edu.gva.es/fp", "secret-aules-token")
+	resource := "https://mcp.example/mcp"
+	code, err := store.CreateCode(client.ID, redirect, challenge(verifier), "https://aules.edu.gva.es/fp", resource, "secret-aules-token")
 	if err != nil {
 		t.Fatal(err)
 	}
-	accessToken, _, err := store.Exchange(code, client.ID, redirect, verifier)
+	accessToken, _, gotResource, err := store.Exchange(code, client.ID, redirect, verifier, resource)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if accessToken == "secret-aules-token" {
 		t.Fatal("access token exposed Aules token")
 	}
+	if gotResource != resource {
+		t.Fatalf("resource = %q", gotResource)
+	}
 	session, err := store.AulesSession(accessToken)
 	if err != nil || session.Token != "secret-aules-token" || session.MoodleURL != "https://aules.edu.gva.es/fp" {
 		t.Fatalf("AulesSession() = %#v, %v", session, err)
 	}
-	if _, _, err := store.Exchange(code, client.ID, redirect, verifier); err == nil {
+	if _, _, _, err := store.Exchange(code, client.ID, redirect, verifier, resource); err == nil {
 		t.Fatal("authorization code was reusable")
 	}
 	if err := store.Revoke(accessToken); err != nil {
@@ -62,14 +66,14 @@ func TestAuthorizationIsolationAndPKCE(t *testing.T) {
 	first, _ := store.Register([]string{"https://one.example/callback"})
 	second, _ := store.Register([]string{"https://two.example/callback"})
 	verifier := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
-	code, err := store.CreateCode(first.ID, "https://one.example/callback", challenge(verifier), "https://aules.edu.gva.es/semipresencial", "first-user")
+	code, err := store.CreateCode(first.ID, "https://one.example/callback", challenge(verifier), "https://aules.edu.gva.es/semipresencial", "https://mcp.example/mcp", "first-user")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.Exchange(code, second.ID, "https://two.example/callback", verifier); err == nil {
+	if _, _, _, err := store.Exchange(code, second.ID, "https://two.example/callback", verifier, "https://mcp.example/mcp"); err == nil {
 		t.Fatal("code accepted for different client")
 	}
-	if _, _, err := store.Exchange(code, first.ID, "https://one.example/callback", verifier+"wrong"); err == nil {
+	if _, _, _, err := store.Exchange(code, first.ID, "https://one.example/callback", verifier+"wrong", "https://mcp.example/mcp"); err == nil {
 		t.Fatal("code accepted wrong verifier")
 	}
 }

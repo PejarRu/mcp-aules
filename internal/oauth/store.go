@@ -62,8 +62,8 @@ func Open(path, encodedKey string) (*Store, error) {
 	s := &Store{db: db, aead: aead}
 	_, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS clients (id TEXT PRIMARY KEY, redirect_uris TEXT NOT NULL, created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS codes (hash BLOB PRIMARY KEY, client_id TEXT NOT NULL, redirect_uri TEXT NOT NULL, challenge TEXT NOT NULL, aules_token BLOB NOT NULL, moodle_url TEXT NOT NULL DEFAULT 'https://aules.edu.gva.es/semipresencial', expires_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS tokens (hash BLOB PRIMARY KEY, client_id TEXT NOT NULL, aules_token BLOB NOT NULL, moodle_url TEXT NOT NULL DEFAULT 'https://aules.edu.gva.es/semipresencial', expires_at INTEGER NOT NULL);`)
+CREATE TABLE IF NOT EXISTS codes (hash BLOB PRIMARY KEY, client_id TEXT NOT NULL, redirect_uri TEXT NOT NULL, challenge TEXT NOT NULL, aules_token BLOB NOT NULL, moodle_url TEXT NOT NULL DEFAULT 'https://aules.edu.gva.es/semipresencial', resource TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS tokens (hash BLOB PRIMARY KEY, client_id TEXT NOT NULL, aules_token BLOB NOT NULL, moodle_url TEXT NOT NULL DEFAULT 'https://aules.edu.gva.es/semipresencial', resource TEXT NOT NULL, expires_at INTEGER NOT NULL);`)
 	if err != nil {
 		db.Close()
 		return nil, err
@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS tokens (hash BLOB PRIMARY KEY, client_id TEXT NOT NUL
 	for _, statement := range []string{
 		"ALTER TABLE codes ADD COLUMN moodle_url TEXT NOT NULL DEFAULT 'https://aules.edu.gva.es/semipresencial'",
 		"ALTER TABLE tokens ADD COLUMN moodle_url TEXT NOT NULL DEFAULT 'https://aules.edu.gva.es/semipresencial'",
+		"ALTER TABLE codes ADD COLUMN resource TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE tokens ADD COLUMN resource TEXT NOT NULL DEFAULT ''",
 	} {
 		if _, err := db.Exec(statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
 			db.Close()
@@ -175,7 +177,7 @@ func VerifyPKCE(verifier, challenge string) bool {
 	return base64.RawURLEncoding.EncodeToString(h[:]) == challenge
 }
 
-func (s *Store) CreateCode(clientID, redirect, challenge, moodleURL, aulesToken string) (string, error) {
+func (s *Store) CreateCode(clientID, redirect, challenge, moodleURL, resource, aulesToken string) (string, error) {
 	if err := s.ValidateClient(clientID, redirect); err != nil {
 		return "", err
 	}
@@ -187,38 +189,38 @@ func (s *Store) CreateCode(clientID, redirect, challenge, moodleURL, aulesToken 
 	if err != nil {
 		return "", err
 	}
-	_, err = s.db.Exec(`INSERT INTO codes(hash,client_id,redirect_uri,challenge,aules_token,moodle_url,expires_at) VALUES(?,?,?,?,?,?,?)`, digest(code), clientID, redirect, challenge, enc, moodleURL, time.Now().Add(5*time.Minute).Unix())
+	_, err = s.db.Exec(`INSERT INTO codes(hash,client_id,redirect_uri,challenge,aules_token,moodle_url,resource,expires_at) VALUES(?,?,?,?,?,?,?,?)`, digest(code), clientID, redirect, challenge, enc, moodleURL, resource, time.Now().Add(5*time.Minute).Unix())
 	return code, err
 }
 
-func (s *Store) Exchange(code, clientID, redirect, verifier string) (string, int64, error) {
+func (s *Store) Exchange(code, clientID, redirect, verifier, requestedResource string) (string, int64, string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	defer tx.Rollback()
-	var gotClient, gotRedirect, challenge, moodleURL string
+	var gotClient, gotRedirect, challenge, moodleURL, resource string
 	var encrypted []byte
 	var expires int64
-	err = tx.QueryRow(`SELECT client_id,redirect_uri,challenge,aules_token,moodle_url,expires_at FROM codes WHERE hash=?`, digest(code)).Scan(&gotClient, &gotRedirect, &challenge, &encrypted, &moodleURL, &expires)
-	if err != nil || expires < time.Now().Unix() || gotClient != clientID || gotRedirect != redirect || !VerifyPKCE(verifier, challenge) {
-		return "", 0, errors.New("invalid_grant")
+	err = tx.QueryRow(`SELECT client_id,redirect_uri,challenge,aules_token,moodle_url,resource,expires_at FROM codes WHERE hash=?`, digest(code)).Scan(&gotClient, &gotRedirect, &challenge, &encrypted, &moodleURL, &resource, &expires)
+	if err != nil || expires < time.Now().Unix() || gotClient != clientID || gotRedirect != redirect || !VerifyPKCE(verifier, challenge) || (requestedResource != "" && requestedResource != resource) {
+		return "", 0, "", errors.New("invalid_grant")
 	}
 	if _, err = tx.Exec(`DELETE FROM codes WHERE hash=?`, digest(code)); err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	token, err := randomToken(32)
 	if err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
 	expires = time.Now().Add(time.Hour).Unix()
-	if _, err = tx.Exec(`INSERT INTO tokens(hash,client_id,aules_token,moodle_url,expires_at) VALUES(?,?,?,?,?)`, digest(token), clientID, encrypted, moodleURL, expires); err != nil {
-		return "", 0, err
+	if _, err = tx.Exec(`INSERT INTO tokens(hash,client_id,aules_token,moodle_url,resource,expires_at) VALUES(?,?,?,?,?,?)`, digest(token), clientID, encrypted, moodleURL, resource, expires); err != nil {
+		return "", 0, "", err
 	}
 	if err = tx.Commit(); err != nil {
-		return "", 0, err
+		return "", 0, "", err
 	}
-	return token, expires, nil
+	return token, expires, resource, nil
 }
 
 func (s *Store) AulesSession(bearer string) (AulesSession, error) {
