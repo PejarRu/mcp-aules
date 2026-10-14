@@ -31,7 +31,7 @@ func TestAuthorizationCodeFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	verifier := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
-	code, err := store.CreateCode(client.ID, redirect, challenge(verifier), "secret-aules-token")
+	code, err := store.CreateCode(client.ID, redirect, challenge(verifier), "https://aules.edu.gva.es/fp", "secret-aules-token")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,9 +42,9 @@ func TestAuthorizationCodeFlow(t *testing.T) {
 	if accessToken == "secret-aules-token" {
 		t.Fatal("access token exposed Aules token")
 	}
-	got, err := store.AulesToken(accessToken)
-	if err != nil || got != "secret-aules-token" {
-		t.Fatalf("AulesToken() = %q, %v", got, err)
+	session, err := store.AulesSession(accessToken)
+	if err != nil || session.Token != "secret-aules-token" || session.MoodleURL != "https://aules.edu.gva.es/fp" {
+		t.Fatalf("AulesSession() = %#v, %v", session, err)
 	}
 	if _, _, err := store.Exchange(code, client.ID, redirect, verifier); err == nil {
 		t.Fatal("authorization code was reusable")
@@ -52,7 +52,7 @@ func TestAuthorizationCodeFlow(t *testing.T) {
 	if err := store.Revoke(accessToken); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AulesToken(accessToken); err == nil {
+	if _, err := store.AulesSession(accessToken); err == nil {
 		t.Fatal("revoked token remained valid")
 	}
 }
@@ -62,7 +62,7 @@ func TestAuthorizationIsolationAndPKCE(t *testing.T) {
 	first, _ := store.Register([]string{"https://one.example/callback"})
 	second, _ := store.Register([]string{"https://two.example/callback"})
 	verifier := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
-	code, err := store.CreateCode(first.ID, "https://one.example/callback", challenge(verifier), "first-user")
+	code, err := store.CreateCode(first.ID, "https://one.example/callback", challenge(verifier), "https://aules.edu.gva.es/semipresencial", "first-user")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,7 +26,8 @@ func TestConfigValidate(t *testing.T) {
 		{"missing public URL", func(c *config.Config) { c.PublicBaseURL = "" }, true},
 		{"missing encryption key", func(c *config.Config) { c.EncryptionKey = "" }, true},
 		{"insecure public URL", func(c *config.Config) { c.PublicBaseURL = "http://example.com" }, true},
-		{"wrong Moodle", func(c *config.Config) { c.MoodleURL = "https://moodle.example.com" }, true},
+		{"FP", func(c *config.Config) { c.MoodleURL = config.FPURL }, false},
+		{"unsupported Moodle", func(c *config.Config) { c.MoodleURL = "https://moodle.example.com" }, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

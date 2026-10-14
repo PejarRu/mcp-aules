@@ -24,9 +24,14 @@ type app struct {
 	store *oauth.Store
 	mcp   http.Handler
 }
-type authPage struct{ ClientID, RedirectURI, State, Challenge, ChallengeMethod, Resource, Scope, Error string }
+type authPage struct {
+	ClientID, RedirectURI, State, Challenge, ChallengeMethod, Resource, Scope, MoodleURL, Error string
+	Platforms                                                                                   []config.MoodlePlatform
+}
 
 var loginTemplate = template.Must(template.New("login").Parse(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conectar Aules</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f4f7fb;color:#172033;font:16px system-ui,sans-serif}main{width:min(92vw,430px);padding:2rem;background:#fff;border:1px solid #dce3ed;border-radius:16px;box-shadow:0 12px 36px #17203318}h1{margin:0 0 .5rem;color:#1769aa}p{line-height:1.5}.hint{color:#5d6879;font-size:.92rem}.error{padding:.8rem 1rem;color:#8a1c1c;background:#fff0f0;border:1px solid #e8aaaa;border-radius:8px}label{display:block;margin:1rem 0 .4rem;font-weight:650}input{width:100%;padding:.8rem;border:1px solid #aeb8c6;border-radius:8px;font:inherit}input:focus{outline:3px solid #1769aa33;border-color:#1769aa}button{width:100%;margin-top:1.4rem;padding:.85rem;border:0;border-radius:8px;background:#1769aa;color:#fff;font:700 1rem system-ui;cursor:pointer}button:hover{background:#0f548b}.privacy{margin-top:1.25rem;font-size:.8rem;color:#6c7685}</style></head><body><main><h1>Conectar Aules</h1><p>Inicia sesión con tus credenciales habituales de Aules.</p>{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}<form method="post" action="/authorize"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="state" value="{{.State}}"><input type="hidden" name="code_challenge" value="{{.Challenge}}"><input type="hidden" name="code_challenge_method" value="{{.ChallengeMethod}}"><input type="hidden" name="resource" value="{{.Resource}}"><input type="hidden" name="scope" value="{{.Scope}}"><label for="username">Usuario de Aules</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false"><p class="hint">Usa tu nombre de usuario, no el correo electrónico.</p><label for="password">Contraseña</label><input id="password" type="password" name="password" autocomplete="current-password"><button type="submit" formnovalidate>Conectar con Aules</button></form><p class="privacy">Las credenciales se envían directamente a Aules. La contraseña no se almacena.</p></main></body></html>`))
+
+var platformLoginTemplate = template.Must(template.New("platform-login").Parse(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conectar Aules</title><style>body{max-width:430px;margin:3rem auto;padding:0 1rem;font:16px system-ui,sans-serif;color:#172033}label,input,select,button{display:block;width:100%;box-sizing:border-box;margin-top:.6rem}input,select,button{padding:.8rem;font:inherit}.error{color:#8a1c1c}</style><h1>Conectar Aules</h1>{{if .Error}}<p class="error">{{.Error}}</p>{{end}}<form method="post" action="/authorize"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="state" value="{{.State}}"><input type="hidden" name="code_challenge" value="{{.Challenge}}"><input type="hidden" name="code_challenge_method" value="{{.ChallengeMethod}}"><input type="hidden" name="resource" value="{{.Resource}}"><input type="hidden" name="scope" value="{{.Scope}}"><label>Plataforma<select name="moodle_url">{{range .Platforms}}<option value="{{.URL}}"{{if eq .URL $.MoodleURL}} selected{{end}}>{{.Name}}</option>{{end}}</select></label><label>Usuario<input name="username" autocomplete="username"></label><label>Contraseña<input name="password" type="password" autocomplete="current-password"></label><button type="submit">Conectar con Aules</button></form>`))
 
 func main() {
 	cfg := config.LoadFromEnv()
@@ -85,8 +90,12 @@ func (a *app) register(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, 201, map[string]any{"client_id": c.ID, "redirect_uris": c.RedirectURIs, "token_endpoint_auth_method": "none"})
 }
-func authInput(r *http.Request) authPage {
-	return authPage{ClientID: r.FormValue("client_id"), RedirectURI: r.FormValue("redirect_uri"), State: r.FormValue("state"), Challenge: r.FormValue("code_challenge"), ChallengeMethod: r.FormValue("code_challenge_method"), Resource: r.FormValue("resource"), Scope: r.FormValue("scope")}
+func (a *app) authInput(r *http.Request) authPage {
+	moodleURL := r.FormValue("moodle_url")
+	if moodleURL == "" {
+		moodleURL = a.cfg.MoodleURL
+	}
+	return authPage{ClientID: r.FormValue("client_id"), RedirectURI: r.FormValue("redirect_uri"), State: r.FormValue("state"), Challenge: r.FormValue("code_challenge"), ChallengeMethod: r.FormValue("code_challenge_method"), Resource: r.FormValue("resource"), Scope: r.FormValue("scope"), MoodleURL: moodleURL, Platforms: config.MoodlePlatforms}
 }
 func (a *app) validateAuth(p authPage, responseType string) error {
 	if responseType != "code" {
@@ -95,10 +104,13 @@ func (a *app) validateAuth(p authPage, responseType string) error {
 	if err := a.store.ValidateClient(p.ClientID, p.RedirectURI); err != nil {
 		return err
 	}
+	if !config.IsSupportedMoodleURL(p.MoodleURL) {
+		return fmt.Errorf("unsupported Aules platform")
+	}
 	return oauth.ValidatePKCE(p.Challenge, p.ChallengeMethod)
 }
 func (a *app) authorizeGet(w http.ResponseWriter, r *http.Request) {
-	p := authInput(r)
+	p := a.authInput(r)
 	if err := a.validateAuth(p, r.URL.Query().Get("response_type")); err != nil {
 		log.Printf("OAuth authorize request rejected: %v", err)
 		http.Error(w, "invalid authorization request", 400)
@@ -106,7 +118,7 @@ func (a *app) authorizeGet(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("OAuth authorize page opened for client %s", shortID(p.ClientID))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	loginTemplate.Execute(w, p)
+	platformLoginTemplate.Execute(w, p)
 }
 func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
 	started := time.Now()
@@ -115,7 +127,7 @@ func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", 400)
 		return
 	}
-	p := authInput(r)
+	p := a.authInput(r)
 	if err := a.validateAuth(p, "code"); err != nil {
 		log.Printf("OAuth authorize submission rejected: %v", err)
 		http.Error(w, "invalid authorization request", 400)
@@ -127,20 +139,20 @@ func (a *app) authorizePost(w http.ResponseWriter, r *http.Request) {
 		p.Error = "Introduce tu usuario de Aules y contraseña."
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusBadRequest)
-		loginTemplate.Execute(w, p)
+		platformLoginTemplate.Execute(w, p)
 		return
 	}
 	log.Printf("OAuth Aules authentication started for client %s", shortID(p.ClientID))
-	token, err := api.GetTokenFromCredentials(r.Context(), a.cfg.MoodleURL, username, password)
+	token, err := api.GetTokenFromCredentials(r.Context(), p.MoodleURL, username, password)
 	if err != nil {
 		log.Printf("OAuth Aules authentication failed for client %s after %s: %v", shortID(p.ClientID), time.Since(started).Round(time.Millisecond), err)
 		p.Error = "No se pudo iniciar sesión. Comprueba el usuario de Aules y la contraseña e inténtalo de nuevo."
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
-		loginTemplate.Execute(w, p)
+		platformLoginTemplate.Execute(w, p)
 		return
 	}
-	code, err := a.store.CreateCode(p.ClientID, p.RedirectURI, p.Challenge, token)
+	code, err := a.store.CreateCode(p.ClientID, p.RedirectURI, p.Challenge, p.MoodleURL, token)
 	if err != nil {
 		log.Printf("OAuth authorization code creation failed for client %s: %v", shortID(p.ClientID), err)
 		http.Error(w, "authorization failed", 500)
@@ -189,13 +201,13 @@ func (a *app) bearer(next http.Handler) http.Handler {
 			unauthorized(w, a.cfg.PublicBaseURL)
 			return
 		}
-		moodleToken, err := a.store.AulesToken(bearer)
+		session, err := a.store.AulesSession(bearer)
 		if err != nil {
 			unauthorized(w, a.cfg.PublicBaseURL)
 			return
 		}
 		client := api.NewClient()
-		client.SetSession(a.cfg.MoodleURL, moodleToken)
+		client.SetSession(session.MoodleURL, session.Token)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, client)))
 	})
 }

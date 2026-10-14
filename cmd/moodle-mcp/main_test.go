@@ -49,6 +49,25 @@ func TestOAuthMetadata(t *testing.T) {
 	}
 }
 
+func TestAuthorizeListsAulesPlatforms(t *testing.T) {
+	a := testApp(t)
+	client, err := a.store.Register([]string{"https://client.example/callback"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	challenge := strings.Repeat("a", 43)
+	req := httptest.NewRequest(http.MethodGet, "/authorize?response_type=code&client_id="+client.ID+"&redirect_uri=https%3A%2F%2Fclient.example%2Fcallback&code_challenge="+challenge+"&code_challenge_method=S256", nil)
+	recorder := httptest.NewRecorder()
+	a.authorizeGet(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, "name=\"moodle_url\"") || !strings.Contains(body, config.FPURL) {
+		t.Fatal("Aules platform selector missing")
+	}
+}
+
 func TestBearerChallenge(t *testing.T) {
 	a := testApp(t)
 	recorder := httptest.NewRecorder()

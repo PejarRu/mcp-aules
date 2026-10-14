@@ -25,7 +25,7 @@ Tools enriquecidas: `get_assignments`, `get_assignment_details`, `get_assignment
 | `AULES_ENCRYPTION_KEY` | Clave AES-256: 32 bytes codificados en base64 |
 | `LISTEN_ADDR` | Dirección HTTP; default `:8080` |
 | `DATABASE_PATH` | SQLite; default `/data/moodle-mcp.db` |
-| `MOODLE_URL` | Fijo en `https://aules.edu.gva.es` |
+| `MOODLE_URL` | Plataforma predeterminada: `https://aules.edu.gva.es/semipresencial` o `https://aules.edu.gva.es/fp` |
 
 Generar clave:
 

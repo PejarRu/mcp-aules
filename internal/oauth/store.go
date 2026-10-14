@@ -36,6 +36,11 @@ type Authorization struct {
 	EncryptedAules []byte
 }
 
+type AulesSession struct {
+	Token     string
+	MoodleURL string
+}
+
 func Open(path, encodedKey string) (*Store, error) {
 	key, err := base64.StdEncoding.DecodeString(encodedKey)
 	if err != nil || len(key) != 32 {
@@ -57,11 +62,20 @@ func Open(path, encodedKey string) (*Store, error) {
 	s := &Store{db: db, aead: aead}
 	_, err = db.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS clients (id TEXT PRIMARY KEY, redirect_uris TEXT NOT NULL, created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS codes (hash BLOB PRIMARY KEY, client_id TEXT NOT NULL, redirect_uri TEXT NOT NULL, challenge TEXT NOT NULL, aules_token BLOB NOT NULL, expires_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS tokens (hash BLOB PRIMARY KEY, client_id TEXT NOT NULL, aules_token BLOB NOT NULL, expires_at INTEGER NOT NULL);`)
+CREATE TABLE IF NOT EXISTS codes (hash BLOB PRIMARY KEY, client_id TEXT NOT NULL, redirect_uri TEXT NOT NULL, challenge TEXT NOT NULL, aules_token BLOB NOT NULL, moodle_url TEXT NOT NULL DEFAULT 'https://aules.edu.gva.es/semipresencial', expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS tokens (hash BLOB PRIMARY KEY, client_id TEXT NOT NULL, aules_token BLOB NOT NULL, moodle_url TEXT NOT NULL DEFAULT 'https://aules.edu.gva.es/semipresencial', expires_at INTEGER NOT NULL);`)
 	if err != nil {
 		db.Close()
 		return nil, err
+	}
+	for _, statement := range []string{
+		"ALTER TABLE codes ADD COLUMN moodle_url TEXT NOT NULL DEFAULT 'https://aules.edu.gva.es/semipresencial'",
+		"ALTER TABLE tokens ADD COLUMN moodle_url TEXT NOT NULL DEFAULT 'https://aules.edu.gva.es/semipresencial'",
+	} {
+		if _, err := db.Exec(statement); err != nil && !strings.Contains(err.Error(), "duplicate column name") {
+			db.Close()
+			return nil, err
+		}
 	}
 	return s, nil
 }
@@ -161,7 +175,7 @@ func VerifyPKCE(verifier, challenge string) bool {
 	return base64.RawURLEncoding.EncodeToString(h[:]) == challenge
 }
 
-func (s *Store) CreateCode(clientID, redirect, challenge, aulesToken string) (string, error) {
+func (s *Store) CreateCode(clientID, redirect, challenge, moodleURL, aulesToken string) (string, error) {
 	if err := s.ValidateClient(clientID, redirect); err != nil {
 		return "", err
 	}
@@ -173,7 +187,7 @@ func (s *Store) CreateCode(clientID, redirect, challenge, aulesToken string) (st
 	if err != nil {
 		return "", err
 	}
-	_, err = s.db.Exec(`INSERT INTO codes(hash,client_id,redirect_uri,challenge,aules_token,expires_at) VALUES(?,?,?,?,?,?)`, digest(code), clientID, redirect, challenge, enc, time.Now().Add(5*time.Minute).Unix())
+	_, err = s.db.Exec(`INSERT INTO codes(hash,client_id,redirect_uri,challenge,aules_token,moodle_url,expires_at) VALUES(?,?,?,?,?,?,?)`, digest(code), clientID, redirect, challenge, enc, moodleURL, time.Now().Add(5*time.Minute).Unix())
 	return code, err
 }
 
@@ -183,10 +197,10 @@ func (s *Store) Exchange(code, clientID, redirect, verifier string) (string, int
 		return "", 0, err
 	}
 	defer tx.Rollback()
-	var gotClient, gotRedirect, challenge string
+	var gotClient, gotRedirect, challenge, moodleURL string
 	var encrypted []byte
 	var expires int64
-	err = tx.QueryRow(`SELECT client_id,redirect_uri,challenge,aules_token,expires_at FROM codes WHERE hash=?`, digest(code)).Scan(&gotClient, &gotRedirect, &challenge, &encrypted, &expires)
+	err = tx.QueryRow(`SELECT client_id,redirect_uri,challenge,aules_token,moodle_url,expires_at FROM codes WHERE hash=?`, digest(code)).Scan(&gotClient, &gotRedirect, &challenge, &encrypted, &moodleURL, &expires)
 	if err != nil || expires < time.Now().Unix() || gotClient != clientID || gotRedirect != redirect || !VerifyPKCE(verifier, challenge) {
 		return "", 0, errors.New("invalid_grant")
 	}
@@ -198,7 +212,7 @@ func (s *Store) Exchange(code, clientID, redirect, verifier string) (string, int
 		return "", 0, err
 	}
 	expires = time.Now().Add(time.Hour).Unix()
-	if _, err = tx.Exec(`INSERT INTO tokens(hash,client_id,aules_token,expires_at) VALUES(?,?,?,?)`, digest(token), clientID, encrypted, expires); err != nil {
+	if _, err = tx.Exec(`INSERT INTO tokens(hash,client_id,aules_token,moodle_url,expires_at) VALUES(?,?,?,?,?)`, digest(token), clientID, encrypted, moodleURL, expires); err != nil {
 		return "", 0, err
 	}
 	if err = tx.Commit(); err != nil {
@@ -207,17 +221,18 @@ func (s *Store) Exchange(code, clientID, redirect, verifier string) (string, int
 	return token, expires, nil
 }
 
-func (s *Store) AulesToken(bearer string) (string, error) {
+func (s *Store) AulesSession(bearer string) (AulesSession, error) {
 	var encrypted []byte
+	var moodleURL string
 	var expires int64
-	if err := s.db.QueryRow(`SELECT aules_token,expires_at FROM tokens WHERE hash=?`, digest(bearer)).Scan(&encrypted, &expires); err != nil || expires < time.Now().Unix() {
-		return "", errors.New("invalid token")
+	if err := s.db.QueryRow(`SELECT aules_token,moodle_url,expires_at FROM tokens WHERE hash=?`, digest(bearer)).Scan(&encrypted, &moodleURL, &expires); err != nil || expires < time.Now().Unix() {
+		return AulesSession{}, errors.New("invalid token")
 	}
 	plain, err := s.Decrypt(encrypted)
 	if err != nil {
-		return "", err
+		return AulesSession{}, err
 	}
-	return string(plain), nil
+	return AulesSession{Token: string(plain), MoodleURL: moodleURL}, nil
 }
 
 func (s *Store) Revoke(token string) error {

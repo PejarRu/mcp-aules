@@ -7,7 +7,31 @@ import (
 	"strings"
 )
 
-const DefaultMoodleURL = "https://aules.edu.gva.es/semipresencial"
+const (
+	SemiPresencialURL = "https://aules.edu.gva.es/semipresencial"
+	FPURL             = "https://aules.edu.gva.es/fp"
+	DefaultMoodleURL  = SemiPresencialURL
+)
+
+type MoodlePlatform struct {
+	Name string
+	URL  string
+}
+
+var MoodlePlatforms = []MoodlePlatform{
+	{Name: "Semipresencial", URL: SemiPresencialURL},
+	{Name: "Formación Profesional", URL: FPURL},
+}
+
+func IsSupportedMoodleURL(raw string) bool {
+	raw = strings.TrimRight(raw, "/")
+	for _, platform := range MoodlePlatforms {
+		if raw == platform.URL {
+			return true
+		}
+	}
+	return false
+}
 
 type Config struct {
 	PublicBaseURL string
@@ -23,7 +47,7 @@ func LoadFromEnv() Config {
 		ListenAddr:    envOr("LISTEN_ADDR", ":8080"),
 		DatabasePath:  envOr("DATABASE_PATH", "/data/moodle-mcp.db"),
 		EncryptionKey: os.Getenv("AULES_ENCRYPTION_KEY"),
-		MoodleURL:     envOr("MOODLE_URL", DefaultMoodleURL),
+		MoodleURL:     strings.TrimRight(envOr("MOODLE_URL", DefaultMoodleURL), "/"),
 	}
 }
 
@@ -44,8 +68,8 @@ func (c Config) Validate() error {
 			return errors.New("public and Moodle URLs must be valid HTTPS URLs")
 		}
 	}
-	if c.MoodleURL != DefaultMoodleURL {
-		return errors.New("MOODLE_URL must be https://aules.edu.gva.es/semipresencial")
+	if !IsSupportedMoodleURL(c.MoodleURL) {
+		return errors.New("MOODLE_URL must be a supported Aules platform")
 	}
 	return nil
 }
