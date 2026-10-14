@@ -97,3 +97,12 @@ func TestChatGPTCORSPreflight(t *testing.T) {
 		t.Fatal("CORS origin missing")
 	}
 }
+
+func TestLandingRejectsBaseURLAsMCPEndpoint(t *testing.T) {
+	a := testApp(t)
+	recorder := httptest.NewRecorder()
+	a.landing(recorder, httptest.NewRequest(http.MethodPost, "/", nil))
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), "invalid_mcp_endpoint") || !strings.Contains(recorder.Body.String(), "https://mcp.example/mcp") {
+		t.Fatalf("landing response = %d %s", recorder.Code, recorder.Body.String())
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"html/template"
 	"log"
 	"net/http"
@@ -47,10 +48,7 @@ func main() {
 	a := &app{cfg: cfg, store: store}
 	a.mcp = mcpserver.NewStreamableHTTPServer(newMCPServer(), mcpserver.WithStateLess(true))
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		fmt.Fprint(w, `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Aules MCP</title><body><main><h1>Aules MCP</h1><p>Servidor MCP activo.</p><p>Conecta este servidor desde un cliente MCP compatible usando <code>https://anton.aules.mcp.development.antonberzins.com/mcp</code>. El inicio de sesión se abrirá durante la autorización OAuth.</p></main></body></html>`)
-	})
+	mux.HandleFunc("/{$}", a.landing)
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("GET /.well-known/oauth-authorization-server", a.authorizationMetadata)
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource", a.resourceMetadata)
@@ -63,6 +61,20 @@ func main() {
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: securityHeaders(mux), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}
 	log.Printf("listening on %s", cfg.ListenAddr)
 	log.Fatal(srv.ListenAndServe())
+}
+
+func (a *app) landing(w http.ResponseWriter, r *http.Request) {
+	endpoint := a.cfg.PublicBaseURL + "/mcp"
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusBadRequest, map[string]string{
+			"error":             "invalid_mcp_endpoint",
+			"error_description": "Use the /mcp endpoint, not the base URL.",
+			"mcp_endpoint":      endpoint,
+		})
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>URL de Aules MCP</title><body><main><h1>Esta no es la URL del servidor MCP</h1><p>En ChatGPT u otro cliente MCP, usa exactamente esta URL:</p><p><code>%s</code></p><p>La URL debe terminar en <code>/mcp</code>. No uses solo el dominio.</p></main></body></html>`, html.EscapeString(endpoint))
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
