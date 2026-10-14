@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/PejarRu/mcp-aules/internal/api"
@@ -262,8 +263,20 @@ func securityHeaders(next http.Handler) http.Handler {
 func requestClient(ctx context.Context) *api.Client { return ctx.Value(clientKey{}).(*api.Client) }
 
 func newMCPServer() *mcpserver.MCPServer {
-	s := mcpserver.NewMCPServer("moodle-mcp-server", "2.0.0", mcpserver.WithToolCapabilities(true))
+	s := mcpserver.NewMCPServer("moodle-mcp-server", "2.0.0",
+		mcpserver.WithToolCapabilities(true),
+		mcpserver.WithTitle("Aules MCP"),
+		mcpserver.WithInstructions("Use the read-only Aules tools to retrieve the connected user's academic information."),
+	)
 	add := func(tool mcp.Tool, fn func(context.Context, mcp.CallToolRequest, *api.Client) (string, error)) {
+		tool.Title = strings.ReplaceAll(tool.Name, "_", " ")
+		tool.OutputSchema = mcp.ToolOutputSchema{Type: "object", Properties: map[string]any{}, AdditionalProperties: true}
+		tool.Annotations = mcp.ToolAnnotation{
+			Title:           tool.Title,
+			ReadOnlyHint:    mcp.ToBoolPtr(true),
+			DestructiveHint: mcp.ToBoolPtr(false),
+			OpenWorldHint:   mcp.ToBoolPtr(false),
+		}
 		s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			out, err := fn(ctx, req, requestClient(ctx))
 			if err != nil {
