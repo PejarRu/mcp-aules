@@ -98,6 +98,31 @@ func TestChatGPTCORSPreflight(t *testing.T) {
 	}
 }
 
+func TestIsMobileUserAgent(t *testing.T) {
+	for _, userAgent := range []string{
+		"Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
+		"Mozilla/5.0 (Linux; Android 15; Pixel 9) Mobile",
+	} {
+		if !isMobileUserAgent(userAgent) {
+			t.Errorf("isMobileUserAgent(%q) = false", userAgent)
+		}
+	}
+	if isMobileUserAgent("Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/143.0") {
+		t.Fatal("desktop user agent classified as mobile")
+	}
+}
+
+func TestCallbackHandoffTemplateEscapesCallbackQuery(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	callback := "https://chatgpt.com/callback?code=abc&state=xyz"
+	if err := callbackHandoffTemplate.Execute(recorder, callbackPage{URL: callback}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(recorder.Body.String(), `href="https://chatgpt.com/callback?code=abc&amp;state=xyz"`) {
+		t.Fatal("callback URL missing or not HTML-escaped")
+	}
+}
+
 func TestLandingRejectsBaseURLAsMCPEndpoint(t *testing.T) {
 	a := testApp(t)
 	recorder := httptest.NewRecorder()
