@@ -49,12 +49,12 @@ type AssignmentDisplay struct {
 	DescriptionText    string         `json:"description_text"`
 	DescriptionFormat  int            `json:"description_format"`
 	TeacherAttachments []FileMetadata `json:"teacher_attachments"`
-	SubmissionStatus string `json:"submission_status"`
-	GradingStatus string `json:"grading_status"`
-	SubmittedAt string `json:"submitted_at,omitempty"`
-	AttemptNumber int `json:"attempt_number,omitempty"`
-	IsLate bool `json:"is_late"`
-	IsOverdue bool `json:"is_overdue"`
+	SubmissionStatus   string         `json:"submission_status"`
+	GradingStatus      string         `json:"grading_status"`
+	SubmittedAt        string         `json:"submitted_at,omitempty"`
+	AttemptNumber      int            `json:"attempt_number,omitempty"`
+	IsLate             bool           `json:"is_late"`
+	IsOverdue          bool           `json:"is_overdue"`
 }
 
 type AssignmentCourse struct {
@@ -127,15 +127,25 @@ func HandleGetAssignments(ctx context.Context, client *api.Client, input GetAssi
 					last, _ := status["lastattempt"].(map[string]any)
 					submission, _ := last["submission"].(map[string]any)
 					effectiveDue := a.DueDate
-					if extension := int64Value(last["extensionduedate"]); extension > 0 { effectiveDue = extension }
+					if extension := int64Value(last["extensionduedate"]); extension > 0 {
+						effectiveDue = extension
+					}
 					state, submitted := deriveAssignmentState(submission, last, effectiveDue)
 					d.AttemptNumber = intValue(submission["attemptnumber"])
-					if state == "not_submitted" && d.AttemptNumber > 0 { state = "reopened" }
+					if state == "not_submitted" && d.AttemptNumber > 0 {
+						state = "reopened"
+					}
 					d.SubmissionStatus, d.SubmittedAt = state, rfc3339(submitted)
 					d.IsLate = submitted > 0 && effectiveDue > 0 && submitted > effectiveDue
 					d.IsOverdue = submitted == 0 && effectiveDue > 0 && localTime(effectiveDue).Before(nowMadrid())
 					feedback, _ := status["feedback"].(map[string]any)
-					if boolValue(last["graded"]) || stringValue(last["gradingstatus"]) == "graded" || len(feedback) > 0 { d.GradingStatus = "graded" } else if state == "submitted" || state == "submitted_late" { d.GradingStatus = "pending" } else { d.GradingStatus = "not_graded" }
+					if boolValue(last["graded"]) || stringValue(last["gradingstatus"]) == "graded" || len(feedback) > 0 {
+						d.GradingStatus = "graded"
+					} else if state == "submitted" || state == "submitted_late" {
+						d.GradingStatus = "pending"
+					} else {
+						d.GradingStatus = "not_graded"
+					}
 				}
 			}
 			display = append(display, d)

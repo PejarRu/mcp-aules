@@ -56,19 +56,31 @@ func TestHandleListCourses_Success(t *testing.T) {
 }
 
 func TestHandleGetAssignmentsIncludesSubmissionState(t *testing.T) {
- handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-  w.Header().Set("Content-Type", "application/json")
-  switch r.URL.Query().Get("wsfunction") {
-  case "mod_assign_get_assignments": json.NewEncoder(w).Encode(map[string]any{"courses": []any{map[string]any{"id": 7, "assignments": []any{map[string]any{"id": 12, "name": "Informe", "duedate": 100, "grade": 100}}}}})
-  case "mod_assign_get_submission_status": json.NewEncoder(w).Encode(map[string]any{"lastattempt": map[string]any{"graded": false, "gradingstatus": "notgraded", "locked": true, "submission": map[string]any{"status": "submitted", "attemptnumber": 1, "timemodified": 120, "plugins": []any{}}}})
-  default: t.Fatalf("unexpected Moodle function %q", r.URL.Query().Get("wsfunction"))
-  }
- })
- client, server := newTestClient(t, handler); defer server.Close()
- result, err := HandleGetAssignments(context.Background(), client, GetAssignmentsInput{CourseID: 7}); if err != nil { t.Fatal(err) }
- var out map[string]any; if err := json.Unmarshal([]byte(result), &out); err != nil { t.Fatal(err) }
- assignment := out["assignments"].([]any)[0].(map[string]any)
- if assignment["submission_status"] != "submitted_late" || assignment["grading_status"] != "pending" || assignment["is_late"] != true || assignment["is_overdue"] != false || assignment["attempt_number"] != float64(1) { t.Fatalf("unexpected status: %#v", assignment) }
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Query().Get("wsfunction") {
+		case "mod_assign_get_assignments":
+			json.NewEncoder(w).Encode(map[string]any{"courses": []any{map[string]any{"id": 7, "assignments": []any{map[string]any{"id": 12, "name": "Informe", "duedate": 100, "grade": 100}}}}})
+		case "mod_assign_get_submission_status":
+			json.NewEncoder(w).Encode(map[string]any{"lastattempt": map[string]any{"graded": false, "gradingstatus": "notgraded", "locked": true, "submission": map[string]any{"status": "submitted", "attemptnumber": 1, "timemodified": 120, "plugins": []any{}}}})
+		default:
+			t.Fatalf("unexpected Moodle function %q", r.URL.Query().Get("wsfunction"))
+		}
+	})
+	client, server := newTestClient(t, handler)
+	defer server.Close()
+	result, err := HandleGetAssignments(context.Background(), client, GetAssignmentsInput{CourseID: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal([]byte(result), &out); err != nil {
+		t.Fatal(err)
+	}
+	assignment := out["assignments"].([]any)[0].(map[string]any)
+	if assignment["submission_status"] != "submitted_late" || assignment["grading_status"] != "pending" || assignment["is_late"] != true || assignment["is_overdue"] != false || assignment["attempt_number"] != float64(1) {
+		t.Fatalf("unexpected status: %#v", assignment)
+	}
 }
 
 func TestHandleGetAssignments_MissingCourseID(t *testing.T) {
