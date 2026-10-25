@@ -297,7 +297,7 @@ func newMCPServer() *mcpserver.MCPServer {
 	s := mcpserver.NewMCPServer("moodle-mcp-server", "2.0.0",
 		mcpserver.WithToolCapabilities(true),
 		mcpserver.WithTitle("Aules MCP"),
-		mcpserver.WithInstructions("Use the read-only Aules tools to retrieve the connected user's academic information."),
+		mcpserver.WithInstructions("Use the read-only Aules tools to retrieve the connected user's academic information. When planning tasks, call list_courses and get_assignments for each relevant course. Treat submitted and submitted_late as already delivered; draft as unfinished; not_submitted as no submission recorded; status_unavailable as unknown. A passed due date alone does not mean the assignment was not submitted. Do not plan delivered assignments as pending."),
 	)
 	add := func(tool mcp.Tool, fn func(context.Context, mcp.CallToolRequest, *api.Client) (string, error)) {
 		tool.Title = strings.ReplaceAll(tool.Name, "_", " ")
@@ -348,7 +348,7 @@ func newMCPServer() *mcpserver.MCPServer {
 	add(mcp.NewTool("get_grades_overview", mcp.WithDescription("Get grades overview")), func(c context.Context, _ mcp.CallToolRequest, a *api.Client) (string, error) {
 		return tools.HandleGetGradesOverview(c, a, tools.GetGradesOverviewInput{})
 	})
-	course("get_assignments", "Get course assignments", func(c context.Context, a *api.Client, id int) (string, error) {
+	course("get_assignments", "List course assignments including your Moodle submission status, grading state, actual submitted time, attempt, and separate late vs overdue indicators. Use before planning to avoid repeating work already handed in. status_unavailable means unknown, not missing.", func(c context.Context, a *api.Client, id int) (string, error) {
 		return tools.HandleGetAssignments(c, a, tools.GetAssignmentsInput{CourseID: id})
 	})
 	add(mcp.NewTool("get_upcoming_assignments", mcp.WithDescription("Get upcoming assignments"), mcp.WithNumber("days_ahead")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {

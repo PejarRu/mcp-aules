@@ -165,3 +165,14 @@ configurar la URL sin `/mcp`.
 4. Hacer commit, push y desplegar por el procedimiento anterior.
 5. Verificar health, respuesta 401 de `/mcp`, logs del contenedor y un cliente
    MCP real si se modificó protocolo/autenticación.
+
+
+## Planificación diaria y estado de entregas
+
+La necesidad prioritaria es que ChatGPT no recomiende repetir tareas ya enviadas. `get_assignments(course_id)` se amplía para llamar `mod_assign_get_submission_status` por assignment e incluir estado individual. Para plan general: consultar `list_courses`, luego `get_assignments` para todos los cursos activos pertinentes. `submitted` y `submitted_late` cuentan como entregadas, aunque sigan sin nota; `draft` no se ha enviado definitivamente; `not_submitted` indica que Moodle no registra entrega; `status_unavailable` se trata como desconocido, nunca como pendiente. Fecha vencida sola no acredita falta de entrega.
+
+Coste operativo: una petición REST adicional por tarea. Revisar rendimiento con cursos grandes y no cambiar a paralelismo hasta medir. Tests deben cubrir enviada tarde (no overdue), borrador, sin entrega y fallo API (unknown).
+
+## Reautenticación móvil ChatGPT (aplazado)
+
+En móvil, Aules puede autenticar y la app ChatGPT abrir una sesión vacía mientras el chat original retiene un popup OAuth antiguo. El usuario confirmó que reenviar el prompt en el chat original hizo que MCP funcionara; el popup era estado visual obsoleto del cliente. Se añadió handoff móvil (`73cdde2`), pero eso no puede garantizar restaurar el chat original. No seguir cambiándolo ahora; investigar solo con logs nuevos por etapas authorize/upstream/callback/token/MCP. No implementar cookies o deep links inventados.

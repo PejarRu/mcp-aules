@@ -7,6 +7,10 @@ arquitectura, producción, decisiones, incidentes, descartes y trabajo pendiente
 Las prácticas reutilizables de seguridad y OAuth están en
 [MCP_REMOTE_AUTH_LESSONS.md](MCP_REMOTE_AUTH_LESSONS.md).
 
+## Estado real de entregas
+
+`get_assignments(course_id)` incluye por actividad `submission_status`, `grading_status`, `submitted_at`, `attempt_number`, `is_late` e `is_overdue`. Para planificar trabajo, consulta cada curso y usa estos estados: `submitted`/`submitted_late` ya están entregadas; `draft` necesita envío final; `not_submitted` no tiene entrega registrada; `status_unavailable` significa desconocido, no pendiente confirmado. No infieras falta de entrega solo por fecha vencida.
+
 ## Endpoints
 
 - `POST /mcp`: Streamable HTTP stateless, protegido por bearer.
