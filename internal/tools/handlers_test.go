@@ -285,19 +285,27 @@ func TestHandleGetMessagesIncludesReadAndUnreadByDefault(t *testing.T) {
 
 func TestHandleGetNotifications_DefaultsApplied(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify default limit and notification type are sent
+		// The mock handles both core_message and popup endpoints.
 		q := r.URL.Query()
-		if got := q.Get("type"); got != "notifications" {
-			t.Errorf("type = %q, want notifications", got)
-		}
-		if got := q.Get("read"); got != "0" {
-			t.Errorf("read = %q, want unread-only 0", got)
-		}
-		if q.Get("limitnum") == "0" {
-			http.Error(w, "bad limit", http.StatusBadRequest)
-			return
+		if r.URL.Path == "/webservice/rest/server.php" {
+			if fn := q.Get("wsfunction"); fn == "core_message_get_messages" {
+				if got := q.Get("type"); got != "notifications" {
+					t.Errorf("type = %q, want notifications", got)
+				}
+				if got := q.Get("read"); got != "0" {
+					t.Errorf("read = %q, want unread-only 0", got)
+				}
+				if q.Get("limitnum") == "0" {
+					http.Error(w, "bad limit", http.StatusBadRequest)
+					return
+				}
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
+		if q.Get("wsfunction") == "message_popup_get_popup_notifications" {
+			json.NewEncoder(w).Encode(map[string]any{"notifications": []any{}})
+			return
+		}
 		json.NewEncoder(w).Encode(map[string]any{"messages": []any{}})
 	})
 	c, srv := newTestClient(t, handler)
@@ -337,5 +345,61 @@ func BenchmarkHandleListCourses(b *testing.B) {
 	b.ResetTimer()
 	for b.Loop() {
 		HandleListCourses(ctx, c, ListCoursesInput{})
+	}
+}
+
+func TestHandleGetRecentChanges_DefaultsCourses(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query()
+		fn := q.Get("wsfunction")
+		switch fn {
+		case "core_enrol_get_users_courses":
+			json.NewEncoder(w).Encode([]map[string]any{{"id": 5, "shortname": "C", "fullname": "Course"}})
+		case "core_course_get_updates_since":
+			json.NewEncoder(w).Encode(map[string]any{"instances": []map[string]any{}})
+		default:
+			json.NewEncoder(w).Encode(map[string]any{})
+		}
+	})
+	c, srv := newTestClient(t, handler)
+	defer srv.Close()
+	c.SetUserID(1)
+
+	res, err := HandleGetRecentChanges(context.Background(), c, GetRecentChangesInput{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res == "" {
+		t.Fatal("expected result")
+	}
+}
+
+func TestHandleReadForum_DiscussionPosts(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		q := r.URL.Query()
+		if q.Get("wsfunction") == "mod_forum_get_discussion_posts" {
+			json.NewEncoder(w).Encode(map[string]any{
+				"posts": []map[string]any{
+					{"id": 1, "subject": "Hola", "message": "Mensaje", "author": map[string]any{"fullname": "Profesor"}, "timecreated": 1700000000, "parentid": nil, "unread": false},
+				},
+				"forumid":  2,
+				"courseid": 3,
+			})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{})
+	})
+	c, srv := newTestClient(t, handler)
+	defer srv.Close()
+	c.SetUserID(1)
+
+	res, err := HandleReadForum(context.Background(), c, ReadForumInput{DiscussionID: 9})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res == "" {
+		t.Fatal("expected result")
 	}
 }

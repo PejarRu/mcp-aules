@@ -14,7 +14,10 @@ contraseña.
 Alcance actual:
 
 - Solo lectura: perfil, cursos, contenidos, notas, tareas, recursos, calendario,
-  plazos, mensajes privados (`get_messages`) y notificaciones (`get_notifications`).
+  plazos, mensajes privados (`get_messages`) y notificaciones (`get_notifications`,
+  que combina core y popup). Añadidos `read_forum` (foros, discusiones, hilos),
+  `read_resource` (descarga en memoria y extrae texto de PDF, texto, HTML y DOCX)
+  y `get_recent_changes` (cambios por curso, ventana por defecto de 7 días).
 - Plataformas soportadas: Semipresencial (`/semipresencial`) y Formación
   Profesional (`/fp`), seleccionadas durante cada autorización.
 - Aislamiento por usuario y por sesión. No existe un token Aules global.

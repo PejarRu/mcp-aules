@@ -69,7 +69,6 @@ func (s *RESTServer) registerRoutes() {
 	// Assignments
 	s.mux.HandleFunc("/api/assignments", s.handleGetAssignments)
 	s.mux.HandleFunc("/api/assignments/upcoming", s.handleUpcomingAssignments)
-	s.mux.HandleFunc("/api/journal/entry", s.handleGetJournalEntry)
 
 	// Calendar
 	s.mux.HandleFunc("/api/calendar/events", s.handleCalendarEvents)
@@ -339,42 +338,6 @@ func (s *RESTServer) handleUpdateAssignment(w http.ResponseWriter, r *http.Reque
 	s.jsonResponse(w, result, err)
 }
 
-func (s *RESTServer) handleGetJournalEntry(w http.ResponseWriter, r *http.Request) {
-	if !s.client.IsAuthenticated() {
-		http.Error(w, "Not authenticated", http.StatusUnauthorized)
-		return
-	}
-	journalID := s.getIntQuery(r, "journal_id")
-	ctx := r.Context()
-	result, err := tools.HandleGetJournalEntry(ctx, s.client, tools.GetJournalEntryInput{JournalID: journalID})
-	s.jsonResponse(w, result, err)
-}
-
-func (s *RESTServer) handleSubmitJournal(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if !s.client.IsAuthenticated() {
-		http.Error(w, "Not authenticated", http.StatusUnauthorized)
-		return
-	}
-	var req struct {
-		JournalID int    `json:"journal_id"`
-		Text      string `json:"text"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request", http.StatusBadRequest)
-		return
-	}
-	ctx := r.Context()
-	result, err := tools.HandleSubmitJournal(ctx, s.client, tools.SubmitJournalInput{
-		JournalID: req.JournalID,
-		Text:      req.Text,
-	})
-	s.jsonResponse(w, result, err)
-}
-
 func (s *RESTServer) handleCalendarEvents(w http.ResponseWriter, r *http.Request) {
 	if !s.client.IsAuthenticated() {
 		http.Error(w, "Not authenticated", http.StatusUnauthorized)
@@ -588,26 +551,6 @@ func getOpenAPISpec() map[string]interface{} {
 						"assignment_id": map[string]interface{}{"type": "integer", "description": "Assignment ID"},
 						"text":          map[string]interface{}{"type": "string", "description": "New submission text (HTML supported)"},
 					}, []string{"assignment_id", "text"}),
-					"responses": ok,
-				},
-			},
-			// Journal
-			"/api/journal/entry": map[string]interface{}{
-				"get": map[string]interface{}{
-					"summary":     "Get current journal entry (for Journal activities e.g. Technical Article Review)",
-					"operationId": "getJournalEntry",
-					"parameters":  []map[string]interface{}{intParam("journal_id", "Journal module ID (from course contents, modname=journal)", true)},
-					"responses":   ok,
-				},
-			},
-			"/api/journal/submit": map[string]interface{}{
-				"post": map[string]interface{}{
-					"summary":     "Submit or update a journal entry (for Journal activities e.g. Technical Article Review, Research Paper Review)",
-					"operationId": "submitJournal",
-					"requestBody": jsonBody(map[string]interface{}{
-						"journal_id": map[string]interface{}{"type": "integer", "description": "Journal module ID (from course contents, modname=journal)"},
-						"text":       map[string]interface{}{"type": "string", "description": "Journal entry text (HTML supported)"},
-					}, []string{"journal_id", "text"}),
 					"responses": ok,
 				},
 			},

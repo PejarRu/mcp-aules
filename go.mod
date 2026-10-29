@@ -3,6 +3,7 @@ module github.com/PejarRu/mcp-aules
 go 1.26.0
 
 require (
+	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	github.com/mark3labs/mcp-go v1.2.1
 	modernc.org/sqlite v1.60.1
 )

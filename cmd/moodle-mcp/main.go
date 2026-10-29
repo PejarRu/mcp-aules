@@ -404,6 +404,15 @@ func newMCPServer() *mcpserver.MCPServer {
 	add(mcp.NewTool("list_resources", mcp.WithDescription("List course resources"), mcp.WithNumber("course_id", mcp.Required()), mcp.WithString("mime_type")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
 		return tools.HandleListResources(c, a, tools.ListResourcesInput{CourseID: intArg(r, "course_id"), MimeType: mcp.ParseString(r, "mime_type", "")})
 	})
+	add(mcp.NewTool("read_resource", mcp.WithDescription("Download and extract text from a course resource (PDF, text, HTML, DOCX)"), mcp.WithNumber("course_id", mcp.Required()), mcp.WithNumber("module_id", mcp.Required()), mcp.WithNumber("max_chars")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleReadResource(c, a, tools.ReadResourceInput{CourseID: intArg(r, "course_id"), ModuleID: intArg(r, "module_id"), MaxChars: intArg(r, "max_chars")})
+	})
+	add(mcp.NewTool("get_recent_changes", mcp.WithDescription("Get recent course changes since a timestamp"), mcp.WithNumber("course_id"), mcp.WithNumber("since")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetRecentChanges(c, a, tools.GetRecentChangesInput{CourseID: intArg(r, "course_id"), Since: int64(mcp.ParseInt(r, "since", 0))})
+	})
+	add(mcp.NewTool("read_forum", mcp.WithDescription("Read forums: list course forums, list discussions, or full thread posts"), mcp.WithNumber("course_id"), mcp.WithNumber("forum_id"), mcp.WithNumber("discussion_id"), mcp.WithNumber("limit")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleReadForum(c, a, tools.ReadForumInput{CourseID: intArg(r, "course_id"), ForumID: intArg(r, "forum_id"), DiscussionID: intArg(r, "discussion_id"), Limit: intArg(r, "limit")})
+	})
 	add(mcp.NewTool("get_calendar_events", mcp.WithDescription("Get calendar events"), mcp.WithNumber("days_ahead")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
 		return tools.HandleGetCalendarEvents(c, a, tools.GetCalendarEventsInput{DaysAhead: intArg(r, "days_ahead")})
 	})

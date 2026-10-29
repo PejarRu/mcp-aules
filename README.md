@@ -26,7 +26,7 @@ Las prácticas reutilizables de seguridad y OAuth están en
 
 Solo se publican tools de lectura: perfil, cursos, contenidos, notas, tareas, recursos, calendario, plazos, mensajes privados y notificaciones. No se publican login MCP, descargas ni operaciones mutadoras.
 
-Tools enriquecidas: `get_assignments`, `get_assignment_details`, `get_assignment_status`, `list_quizzes`, `get_quiz_status`, `get_grades`, `get_course_gradebook`, `list_course_announcements`, `get_course_learning_content`; `get_notifications` devuelve cuerpo completo y contexto; `get_messages` lista mensajes privados.
+Tools enriquecidas: `get_assignments`, `get_assignment_details`, `get_assignment_status`, `list_quizzes`, `get_quiz_status`, `get_grades`, `get_course_gradebook`, `list_course_announcements`, `get_course_learning_content`; `get_notifications` combina notificaciones core y popup con deduplicación; `get_messages` lista mensajes privados; `read_forum` lista foros, discusiones y lee hilos; `read_resource` descarga y extrae texto de PDF, texto, HTML y DOCX; `get_recent_changes` resume cambios por curso desde una ventana temporal.
 
 ## Configuración
 
