@@ -24,9 +24,9 @@ Las prácticas reutilizables de seguridad y OAuth están en
 - `POST /token`: canje de código con PKCE S256.
 - `POST /revoke`: revocación de bearer.
 
-Solo se publican tools de lectura: perfil, cursos, contenidos, notas, tareas, recursos, calendario, plazos y notificaciones. No se publican login MCP, descargas ni operaciones mutadoras.
+Solo se publican tools de lectura: perfil, cursos, contenidos, notas, tareas, recursos, calendario, plazos, mensajes privados y notificaciones. No se publican login MCP, descargas ni operaciones mutadoras.
 
-Tools enriquecidas: `get_assignments`, `get_assignment_details`, `get_assignment_status`, `list_quizzes`, `get_quiz_status`, `get_grades`, `get_course_gradebook`, `list_course_announcements`, `get_course_learning_content`; `get_notifications` devuelve cuerpo completo y contexto.
+Tools enriquecidas: `get_assignments`, `get_assignment_details`, `get_assignment_status`, `list_quizzes`, `get_quiz_status`, `get_grades`, `get_course_gradebook`, `list_course_announcements`, `get_course_learning_content`; `get_notifications` devuelve cuerpo completo y contexto; `get_messages` lista mensajes privados.
 
 ## Configuración
 
@@ -37,6 +37,7 @@ Tools enriquecidas: `get_assignments`, `get_assignment_details`, `get_assignment
 | `LISTEN_ADDR` | Dirección HTTP; default `:8080` |
 | `DATABASE_PATH` | SQLite; default `/data/moodle-mcp.db` |
 | `MOODLE_URL` | Plataforma predeterminada: `https://aules.edu.gva.es/semipresencial` o `https://aules.edu.gva.es/fp` |
+| `AULES_KEEPALIVE_ENABLED` | Keepalive experimental cada 30 min para todos los tokens Aules asociados a grants MCP aún válidos; default `false`. Puede generar tráfico Aules en segundo plano. Habilitar solo tras verificar que Aules extiende expiración del token webservice y aceptar este comportamiento. |
 
 Generar clave:
 
@@ -80,5 +81,7 @@ Traefik debe tener red `traefik`, entrypoint `websecure` y gestión TLS configur
 2. Cliente abre `/authorize` con `response_type=code`, `client_id`, `redirect_uri`, `state`, `code_challenge` y `code_challenge_method=S256`.
 3. Usuario introduce credenciales Aules en formulario HTTPS. Credenciales no se persisten.
 4. Código dura 5 minutos y tiene un solo uso. `/token` exige `grant_type=authorization_code` y `code_verifier`.
-5. Bearer MCP dura 1 hora. Token Aules permanece cifrado en SQLite con AES-256-GCM.
+5. Bearer MCP dura 7 días desde autorización. Token Aules permanece cifrado en SQLite con AES-256-GCM; Moodle puede invalidarlo antes.
 6. `/revoke` invalida bearer MCP.
+
+El keepalive Aules es experimental y apagado por defecto. Consulta `core_webservice_get_site_info` cada 30 minutos para cada token Aules único asociado a grants MCP no expirados. Puede generar tráfico Aules aunque el usuario no use MCP. No activar hasta verificar con cuenta de prueba que la llamada renueva validez del token y aceptar consultas en segundo plano. Token webservice no es cookie de sesión de navegador Moodle.

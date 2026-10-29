@@ -10,6 +10,7 @@ services:
       DATABASE_PATH: /data/moodle-mcp.db
       AULES_ENCRYPTION_KEY: ${AULES_ENCRYPTION_KEY:?required}
       MOODLE_URL: https://aules.edu.gva.es/semipresencial
+      AULES_KEEPALIVE_ENABLED: ${AULES_KEEPALIVE_ENABLED:-false}
     volumes:
       - moodle-mcp-data:/data
     networks:

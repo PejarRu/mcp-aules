@@ -55,12 +55,25 @@ type GetNotificationsInput struct {
 	UnreadOnly bool `json:"unread_only,omitempty" jsonschema:"description=Only show unread notifications (default: true)"`
 }
 
+type GetMessagesInput struct {
+	Limit      int  `json:"limit,omitempty" jsonschema:"description=Maximum number of private messages to return (default: 20)"`
+	UnreadOnly bool `json:"unread_only,omitempty" jsonschema:"description=Only show unread private messages"`
+}
+
+func HandleGetMessages(ctx context.Context, client *api.Client, input GetMessagesInput) (string, error) {
+	return handleGetMessages(ctx, client, input.Limit, input.UnreadOnly, "conversations")
+}
+
 func HandleGetNotifications(ctx context.Context, client *api.Client, input GetNotificationsInput) (string, error) {
+	return handleGetMessages(ctx, client, input.Limit, input.UnreadOnly, "notifications")
+}
+
+func handleGetMessages(ctx context.Context, client *api.Client, requestedLimit int, unreadOnly bool, messageType string) (string, error) {
 	if !client.IsAuthenticated() {
 		return "", api.ErrNotAuthenticated
 	}
 
-	limit := input.Limit
+	limit := requestedLimit
 	if limit <= 0 {
 		limit = 20
 	}
@@ -74,11 +87,13 @@ func HandleGetNotifications(ctx context.Context, client *api.Client, input GetNo
 	}
 	params := map[string]string{
 		"useridto":    fmt.Sprintf("%d", userID),
-		"type":        "notifications",
+		"useridfrom":  "0",
+		"type":        messageType,
+		"read":        "2",
 		"limitnum":    fmt.Sprintf("%d", limit),
 		"newestfirst": "1",
 	}
-	if input.UnreadOnly {
+	if unreadOnly {
 		params["read"] = "0"
 	}
 

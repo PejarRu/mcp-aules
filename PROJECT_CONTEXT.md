@@ -14,7 +14,7 @@ contraseña.
 Alcance actual:
 
 - Solo lectura: perfil, cursos, contenidos, notas, tareas, recursos, calendario,
-  plazos y notificaciones.
+  plazos, mensajes privados (`get_messages`) y notificaciones (`get_notifications`).
 - Plataformas soportadas: Semipresencial (`/semipresencial`) y Formación
   Profesional (`/fp`), seleccionadas durante cada autorización.
 - Aislamiento por usuario y por sesión. No existe un token Aules global.
@@ -94,8 +94,14 @@ Las rutas públicas son:
 El flujo soportado es Authorization Code con PKCE S256 y clientes públicos. Se
 preservan `state`, `resource`, `scope`, challenge y método entre formulario y
 callback; se devuelve `iss`; el token response contiene el `resource` validado.
-Los códigos duran cinco minutos, son de un solo uso, y los bearer MCP duran una
-hora.
+Los códigos duran cinco minutos, son de un solo uso, y los bearer MCP duran
+siete días desde la autorización. Esto no amplía la validez del token Aules: Moodle
+puede invalidarlo antes.
+
+El keepalive de `core_webservice_get_site_info` cada 30 minutos existe como opción
+experimental, pero permanece apagado por defecto hasta verificar en una cuenta
+de prueba que Aules extiende el token webservice. Este token no es la cookie de
+sesión del navegador Moodle; el ping no garantiza extender sesión del sitio.
 
 Para configurar ChatGPT hay que usar **exactamente** la URL canónica terminada
 en `/mcp`. Usar solo el dominio permite que OAuth llegue a completarse, pero

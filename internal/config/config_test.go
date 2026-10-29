@@ -16,6 +16,19 @@ func validConfig() config.Config {
 	}
 }
 
+func TestKeepaliveConfiguration(t *testing.T) {
+	t.Setenv("PUBLIC_BASE_URL", "https://mcp.example")
+	t.Setenv("AULES_ENCRYPTION_KEY", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")
+	t.Setenv("AULES_KEEPALIVE_ENABLED", "")
+	if config.LoadFromEnv().KeepaliveEnabled {
+		t.Fatal("keepalive must default to disabled")
+	}
+	t.Setenv("AULES_KEEPALIVE_ENABLED", "true")
+	if !config.LoadFromEnv().KeepaliveEnabled {
+		t.Fatal("explicit keepalive opt-in was ignored")
+	}
+}
+
 func TestConfigValidate(t *testing.T) {
 	tests := []struct {
 		name    string

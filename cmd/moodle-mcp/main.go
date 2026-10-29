@@ -20,6 +20,8 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
+const keepaliveInterval = 30 * time.Minute
+
 type clientKey struct{}
 type app struct {
 	cfg   config.Config
@@ -39,6 +41,33 @@ var callbackHandoffTemplate = template.Must(template.New("callback-handoff").Par
 
 var platformLoginTemplate = template.Must(template.New("platform-login").Parse(`<!doctype html><html lang="es"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Conectar Aules</title><style>*{box-sizing:border-box}body{margin:0;min-height:100vh;min-height:100svh;padding:max(1.25rem,env(safe-area-inset-top)) 1rem max(1.25rem,env(safe-area-inset-bottom));display:grid;place-items:center;background:radial-gradient(ellipse at top,#e1f1ff 0,transparent 58%),linear-gradient(145deg,#f4f8fc,#edf4f8);color:#15243a;font:16px/1.5 system-ui,-apple-system,BlinkMacSystemFont,sans-serif}body>h1,body>p{width:min(100%,440px)}body>h1{margin:0;color:#125d9b;font-size:1.75rem}body>p{margin:.3rem 0;color:#526479}form{width:min(100%,440px);padding:clamp(1.15rem,5vw,2rem);background:#fff;border:1px solid #dbe6ef;border-radius:22px;box-shadow:0 18px 50px #153a5718}label{display:block;margin:1rem 0 .45rem;font-weight:650}input,select{display:block;width:100%;min-height:52px;padding:.8rem .9rem;border:1px solid #b8c7d5;border-radius:12px;background:#fff;color:inherit;font:inherit;font-size:16px}input:focus,select:focus{outline:3px solid #1683cb2e;border-color:#1683cb}button{display:block;width:100%;min-height:54px;margin-top:1.35rem;padding:.85rem;border:0;border-radius:12px;background:linear-gradient(100deg,#0877bd,#1268aa);color:#fff;font:700 1rem system-ui,sans-serif;cursor:pointer;touch-action:manipulation}button:hover{filter:brightness(.96)}.error{padding:.85rem 1rem;border:1px solid #efc2c2;border-radius:12px;background:#fff2f2;color:#8b2424}.hint{color:#68788a;font-size:.9rem}.privacy{margin:1rem 0 0;color:#718093;font-size:.82rem}</style><h1>Conectar Aules</h1>{{if .Error}}<p class="error">{{.Error}}</p>{{end}}<form method="post" action="/authorize"><input type="hidden" name="client_id" value="{{.ClientID}}"><input type="hidden" name="redirect_uri" value="{{.RedirectURI}}"><input type="hidden" name="state" value="{{.State}}"><input type="hidden" name="code_challenge" value="{{.Challenge}}"><input type="hidden" name="code_challenge_method" value="{{.ChallengeMethod}}"><input type="hidden" name="resource" value="{{.Resource}}"><input type="hidden" name="scope" value="{{.Scope}}"><label for="moodle_url">Plataforma</label><select id="moodle_url" name="moodle_url">{{range .Platforms}}<option value="{{.URL}}"{{if eq .URL $.MoodleURL}} selected{{end}}>{{.Name}}</option>{{end}}</select><label for="username">Usuario de Aules</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false"><p class="hint">Usa tu nombre de usuario, no el correo electrónico.</p><label for="password">Contraseña</label><input id="password" name="password" type="password" autocomplete="current-password"><button type="submit" formnovalidate>Conectar con Aules</button><p class="privacy">Las credenciales se envían directamente a Aules. La contraseña no se almacena.</p></form>`))
 
+func runKeepalive(ctx context.Context, store *oauth.Store) {
+	ticker := time.NewTicker(keepaliveInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			sessions, err := store.KeepaliveSessions()
+			if err != nil {
+				log.Printf("Aules keepalive session lookup failed: %v", err)
+				continue
+			}
+			for _, session := range sessions {
+				client := api.NewClient()
+				client.SetSession(session.MoodleURL, session.Token)
+				requestCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
+				_, err := client.Call(requestCtx, "core_webservice_get_site_info", nil)
+				cancel()
+				if err != nil {
+					log.Printf("Aules keepalive failed for platform %s: %v", session.MoodleURL, err)
+				}
+			}
+		}
+	}
+}
+
 func main() {
 	cfg := config.LoadFromEnv()
 	if err := cfg.Validate(); err != nil {
@@ -49,6 +78,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
+	if cfg.KeepaliveEnabled {
+		go runKeepalive(context.Background(), store)
+	}
 	a := &app{cfg: cfg, store: store}
 	a.mcp = mcpserver.NewStreamableHTTPServer(newMCPServer(), mcpserver.WithStateLess(true))
 	mux := http.NewServeMux()
@@ -378,8 +410,11 @@ func newMCPServer() *mcpserver.MCPServer {
 	add(mcp.NewTool("get_upcoming_deadlines", mcp.WithDescription("Get upcoming deadlines"), mcp.WithNumber("days_ahead")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
 		return tools.HandleGetUpcomingDeadlines(c, a, tools.GetUpcomingDeadlinesInput{DaysAhead: intArg(r, "days_ahead")})
 	})
-	add(mcp.NewTool("get_notifications", mcp.WithDescription("Get notifications"), mcp.WithNumber("limit"), mcp.WithBoolean("unread_only")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+	add(mcp.NewTool("get_notifications", mcp.WithDescription("Get Moodle notifications such as assignment and course alerts"), mcp.WithNumber("limit"), mcp.WithBoolean("unread_only")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
 		return tools.HandleGetNotifications(c, a, tools.GetNotificationsInput{Limit: intArg(r, "limit"), UnreadOnly: mcp.ParseBoolean(r, "unread_only", false)})
+	})
+	add(mcp.NewTool("get_messages", mcp.WithDescription("Get private messages from other Moodle users"), mcp.WithNumber("limit"), mcp.WithBoolean("unread_only")), func(c context.Context, r mcp.CallToolRequest, a *api.Client) (string, error) {
+		return tools.HandleGetMessages(c, a, tools.GetMessagesInput{Limit: intArg(r, "limit"), UnreadOnly: mcp.ParseBoolean(r, "unread_only", false)})
 	})
 	return s
 }

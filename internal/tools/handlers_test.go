@@ -246,10 +246,53 @@ func TestHandleLogin_MissingFields(t *testing.T) {
 	}
 }
 
+func TestHandleGetMessagesUsesConversationType(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("type"); got != "conversations" {
+			t.Errorf("type = %q, want conversations", got)
+		}
+		if got := r.URL.Query().Get("read"); got != "0" {
+			t.Errorf("read = %q, want unread-only 0", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"messages": []any{}})
+	})
+	client, server := newTestClient(t, handler)
+	defer server.Close()
+	client.SetUserID(1)
+
+	if _, err := HandleGetMessages(context.Background(), client, GetMessagesInput{UnreadOnly: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHandleGetMessagesIncludesReadAndUnreadByDefault(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("read"); got != "2" {
+			t.Errorf("read = %q, want read and unread 2", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{"messages": []any{}})
+	})
+	client, server := newTestClient(t, handler)
+	defer server.Close()
+	client.SetUserID(1)
+
+	if _, err := HandleGetMessages(context.Background(), client, GetMessagesInput{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHandleGetNotifications_DefaultsApplied(t *testing.T) {
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Verify default limit and read type are sent
+		// Verify default limit and notification type are sent
 		q := r.URL.Query()
+		if got := q.Get("type"); got != "notifications" {
+			t.Errorf("type = %q, want notifications", got)
+		}
+		if got := q.Get("read"); got != "0" {
+			t.Errorf("read = %q, want unread-only 0", got)
+		}
 		if q.Get("limitnum") == "0" {
 			http.Error(w, "bad limit", http.StatusBadRequest)
 			return

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func testStore(t *testing.T) *Store {
@@ -23,6 +24,56 @@ func challenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(hash[:])
 }
 
+func TestKeepaliveSessionsOnlyReturnsUnexpiredBearerGrants(t *testing.T) {
+	store := testStore(t)
+	redirect := "https://client.example/callback"
+	client, err := store.Register([]string{redirect})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~"
+	resource := "https://mcp.example/mcp"
+	code, err := store.CreateCode(client.ID, redirect, challenge(verifier), "https://aules.edu.gva.es/fp", resource, "secret-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer, _, _, err := store.Exchange(code, client.ID, redirect, verifier, resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sessions, err := store.KeepaliveSessions()
+	if err != nil || len(sessions) != 1 {
+		t.Fatalf("KeepaliveSessions() = %d sessions, %v", len(sessions), err)
+	}
+	if sessions[0].Token != "secret-token" || sessions[0].MoodleURL != "https://aules.edu.gva.es/fp" {
+		t.Fatalf("unexpected keepalive session: %#v", sessions[0])
+	}
+	if err := store.Revoke(bearer); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err = store.KeepaliveSessions()
+	if err != nil || len(sessions) != 0 {
+		t.Fatalf("revoked grant included: %d sessions, %v", len(sessions), err)
+	}
+
+	code, err = store.CreateCode(client.ID, redirect, challenge(verifier), "https://aules.edu.gva.es/fp", resource, "expired-token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bearer, _, _, err = store.Exchange(code, client.ID, redirect, verifier, resource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`UPDATE tokens SET expires_at=0 WHERE hash=?`, digest(bearer)); err != nil {
+		t.Fatal(err)
+	}
+	sessions, err = store.KeepaliveSessions()
+	if err != nil || len(sessions) != 0 {
+		t.Fatalf("expired grant included: %d sessions, %v", len(sessions), err)
+	}
+}
+
 func TestAuthorizationCodeFlow(t *testing.T) {
 	store := testStore(t)
 	redirect := "https://client.example/callback"
@@ -36,12 +87,15 @@ func TestAuthorizationCodeFlow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	accessToken, _, gotResource, err := store.Exchange(code, client.ID, redirect, verifier, resource)
+	accessToken, expires, gotResource, err := store.Exchange(code, client.ID, redirect, verifier, resource)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if accessToken == "secret-aules-token" {
 		t.Fatal("access token exposed Aules token")
+	}
+	if seconds := expires - time.Now().Unix(); seconds < 6*24*60*60 || seconds > 7*24*60*60 {
+		t.Fatalf("bearer lifetime = %d seconds; want about seven days", seconds)
 	}
 	if gotResource != resource {
 		t.Fatalf("resource = %q", gotResource)

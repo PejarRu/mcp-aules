@@ -41,6 +41,11 @@ type AulesSession struct {
 	MoodleURL string
 }
 
+type KeepaliveSession struct {
+	Token     string
+	MoodleURL string
+}
+
 func Open(path, encodedKey string) (*Store, error) {
 	key, err := base64.StdEncoding.DecodeString(encodedKey)
 	if err != nil || len(key) != 32 {
@@ -213,7 +218,7 @@ func (s *Store) Exchange(code, clientID, redirect, verifier, requestedResource s
 	if err != nil {
 		return "", 0, "", err
 	}
-	expires = time.Now().Add(time.Hour).Unix()
+	expires = time.Now().Add(7 * 24 * time.Hour).Unix()
 	if _, err = tx.Exec(`INSERT INTO tokens(hash,client_id,aules_token,moodle_url,resource,expires_at) VALUES(?,?,?,?,?,?)`, digest(token), clientID, encrypted, moodleURL, resource, expires); err != nil {
 		return "", 0, "", err
 	}
@@ -235,6 +240,37 @@ func (s *Store) AulesSession(bearer string) (AulesSession, error) {
 		return AulesSession{}, err
 	}
 	return AulesSession{Token: string(plain), MoodleURL: moodleURL}, nil
+}
+
+// KeepaliveSessions returns decrypted Aules tokens for live MCP grants only.
+// Callers must never log or persist the returned token values.
+func (s *Store) KeepaliveSessions() ([]KeepaliveSession, error) {
+	rows, err := s.db.Query(`SELECT aules_token,moodle_url FROM tokens WHERE expires_at>=?`, time.Now().Unix())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []KeepaliveSession
+	seen := make(map[[32]byte]struct{})
+	for rows.Next() {
+		var encrypted []byte
+		var moodleURL string
+		if err := rows.Scan(&encrypted, &moodleURL); err != nil {
+			return nil, err
+		}
+		plain, err := s.Decrypt(encrypted)
+		if err != nil {
+			return nil, fmt.Errorf("decrypting keepalive token: %w", err)
+		}
+		digest := sha256.Sum256(plain)
+		if _, ok := seen[digest]; ok {
+			continue
+		}
+		seen[digest] = struct{}{}
+		sessions = append(sessions, KeepaliveSession{Token: string(plain), MoodleURL: moodleURL})
+	}
+	return sessions, rows.Err()
 }
 
 func (s *Store) Revoke(token string) error {

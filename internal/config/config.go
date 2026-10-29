@@ -34,20 +34,22 @@ func IsSupportedMoodleURL(raw string) bool {
 }
 
 type Config struct {
-	PublicBaseURL string
-	ListenAddr    string
-	DatabasePath  string
-	EncryptionKey string
-	MoodleURL     string
+	PublicBaseURL    string
+	ListenAddr       string
+	DatabasePath     string
+	EncryptionKey    string
+	MoodleURL        string
+	KeepaliveEnabled bool
 }
 
 func LoadFromEnv() Config {
 	return Config{
-		PublicBaseURL: strings.TrimRight(os.Getenv("PUBLIC_BASE_URL"), "/"),
-		ListenAddr:    envOr("LISTEN_ADDR", ":8080"),
-		DatabasePath:  envOr("DATABASE_PATH", "/data/moodle-mcp.db"),
-		EncryptionKey: os.Getenv("AULES_ENCRYPTION_KEY"),
-		MoodleURL:     strings.TrimRight(envOr("MOODLE_URL", DefaultMoodleURL), "/"),
+		PublicBaseURL:    strings.TrimRight(os.Getenv("PUBLIC_BASE_URL"), "/"),
+		ListenAddr:       envOr("LISTEN_ADDR", ":8080"),
+		DatabasePath:     envOr("DATABASE_PATH", "/data/moodle-mcp.db"),
+		EncryptionKey:    os.Getenv("AULES_ENCRYPTION_KEY"),
+		MoodleURL:        strings.TrimRight(envOr("MOODLE_URL", DefaultMoodleURL), "/"),
+		KeepaliveEnabled: strings.EqualFold(os.Getenv("AULES_KEEPALIVE_ENABLED"), "true"),
 	}
 }
 
