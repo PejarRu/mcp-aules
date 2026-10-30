@@ -124,6 +124,9 @@ func (c *Client) Call(ctx context.Context, function string, params map[string]st
 			Exception: apiErr.Exception,
 		}
 	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("Moodle API (%s) returned HTTP %d", function, resp.StatusCode)
+	}
 
 	return json.RawMessage(body), nil
 }

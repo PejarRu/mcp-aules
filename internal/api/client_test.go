@@ -95,6 +95,19 @@ func TestClientCallAPIError(t *testing.T) {
 	}
 }
 
+func TestClientCallHTTPFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	c := api.NewClient()
+	c.SetSession(srv.URL, "testtoken")
+	if _, err := c.Call(context.Background(), "core_webservice_get_site_info", nil); err == nil {
+		t.Fatal("expected non-2xx response to fail")
+	}
+}
+
 func TestClientCallLargeResponseRejected(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Write more than maxResponseBytes (10MB)

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"html/template"
@@ -93,7 +94,7 @@ func main() {
 	mux.HandleFunc("POST /authorize", a.authorizePost)
 	mux.HandleFunc("POST /token", a.token)
 	mux.HandleFunc("POST /revoke", a.revoke)
-	mux.Handle("/mcp", chatGPTCORS(a.bearer(http.HandlerFunc(a.mcp.ServeHTTP))))
+	mux.Handle("/mcp", chatGPTCORS(a.requestLog(a.bearer(http.HandlerFunc(a.mcp.ServeHTTP)))))
 	srv := &http.Server{Addr: cfg.ListenAddr, Handler: securityHeaders(mux), ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 2 * time.Minute, IdleTimeout: 2 * time.Minute}
 	log.Printf("listening on %s", cfg.ListenAddr)
 	log.Fatal(srv.ListenAndServe())
@@ -277,22 +278,80 @@ func (a *app) bearer(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bearer, err := oauth.Bearer(r.Header.Get("Authorization"))
 		if err != nil {
-			log.Printf("MCP request rejected: missing bearer")
+			log.Printf("MCP auth rejected: reason=missing_bearer method=%s", r.Method)
 			unauthorized(w, a.cfg.PublicBaseURL)
 			return
 		}
 		session, err := a.store.AulesSession(bearer)
 		if err != nil {
-			log.Printf("MCP request rejected: invalid bearer")
+			log.Printf("MCP auth rejected: reason=invalid_or_expired_bearer method=%s", r.Method)
 			unauthorized(w, a.cfg.PublicBaseURL)
 			return
 		}
-		log.Printf("MCP request accepted: method=%s platform=%s", r.Method, session.MoodleURL)
+		log.Printf("MCP auth accepted: method=%s platform=%s", r.Method, platformName(session.MoodleURL))
 		client := api.NewClient()
 		client.SetSession(session.MoodleURL, session.Token)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), clientKey{}, client)))
 	})
 }
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusRecorder) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *statusRecorder) Write(body []byte) (int, error) {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(body)
+}
+
+func (w *statusRecorder) Flush() {
+	if w.status == 0 {
+		w.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *statusRecorder) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (a *app) requestLog(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		started := time.Now()
+		recorder := &statusRecorder{ResponseWriter: w}
+		next.ServeHTTP(recorder, r)
+		status := recorder.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		version := r.Header.Get("Mcp-Protocol-Version")
+		switch version {
+		case "", "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28":
+		default:
+			version = "other"
+		}
+		log.Printf("MCP HTTP completed: method=%q status=%d duration=%s protocol_version=%q", r.Method, status, time.Since(started).Round(time.Millisecond), version)
+	})
+}
+
+func platformName(raw string) string {
+	if strings.HasSuffix(strings.TrimRight(raw, "/"), "/fp") {
+		return "fp"
+	}
+	if strings.HasSuffix(strings.TrimRight(raw, "/"), "/semipresencial") {
+		return "semipresencial"
+	}
+	return "other"
+}
+
 func unauthorized(w http.ResponseWriter, base string) {
 	w.Header().Set("WWW-Authenticate", fmt.Sprintf(`Bearer resource_metadata="%s/.well-known/oauth-protected-resource"`, base))
 	writeJSON(w, 401, map[string]string{"error": "invalid_token"})
@@ -343,6 +402,15 @@ func newMCPServer() *mcpserver.MCPServer {
 		s.AddTool(tool, func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			out, err := fn(ctx, req, requestClient(ctx))
 			if err != nil {
+				var upstream *api.APIError
+				category := "other"
+				if errors.As(err, &upstream) {
+					category = "moodle_api"
+					if strings.EqualFold(upstream.ErrorCode, "invalidtoken") {
+						category = "moodle_invalid_token"
+					}
+				}
+				log.Printf("MCP tool failed: tool=%s category=%s", tool.Name, category)
 				return mcp.NewToolResultError(err.Error()), nil
 			}
 			return mcp.NewToolResultText(out), nil
